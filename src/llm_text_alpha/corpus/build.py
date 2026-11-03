@@ -39,6 +39,7 @@ DOCUMENT_SCHEMA = pl.Schema(
         ("items", pl.List(pl.String())),
         ("event_ts_utc", TS),
         ("event_ts_source", pl.String()),
+        ("acceptance_source", pl.String()),
         ("acceptance_raw", pl.String()),
         ("company_name", pl.String()),
         ("former_names", pl.List(pl.String())),
@@ -86,8 +87,14 @@ class Extracted:
     n_chars: int = 0
 
 
-def extract_filing(folder: Path, manifest: dict[str, Any], min_chars: int) -> Extracted:
-    """Build the document row for one fetched filing."""
+def extract_filing(
+    folder: Path,
+    manifest: dict[str, Any],
+    min_chars: int,
+    accepted: datetime,
+    acceptance_source: str = "header",
+) -> Extracted:
+    """Build the document row for one fetched filing, published at ``accepted`` (UTC)."""
     if manifest["form"] != "8-K" or ITEM_202 not in manifest["items"]:
         return Extracted(None, "header_not_item202")
     documents = sorted(manifest["documents"], key=lambda d: int(d["sequence"]))
@@ -115,8 +122,9 @@ def extract_filing(folder: Path, manifest: dict[str, Any], min_chars: int) -> Ex
             "doc_type": DOC_TYPE_ITEM202,
             "form": manifest["form"],
             "items": list(manifest["items"]),
-            "event_ts_utc": datetime.fromisoformat(manifest["acceptance_ts_utc"]),
+            "event_ts_utc": accepted,
             "event_ts_source": "acceptance",
+            "acceptance_source": acceptance_source,
             "acceptance_raw": manifest["acceptance_raw"],
             "company_name": manifest["company_name"],
             "former_names": list(manifest["former_names"]),
@@ -140,18 +148,37 @@ class BuildResult:
     outside_window: int
 
 
-def build_item202(raw_root: Path, start: date, end: date, min_chars: int = 200) -> BuildResult:
-    """Extract every fetched Item 2.02 filing whose acceptance falls in the event window."""
+def build_item202(
+    raw_root: Path,
+    start: date,
+    end: date,
+    min_chars: int = 200,
+    fallback: dict[str, datetime] | None = None,
+) -> BuildResult:
+    """Extract every fetched Item 2.02 filing whose acceptance falls in the event window.
+
+    A header with an empty acceptance time takes the submissions JSON's value from
+    ``fallback`` (accession to UTC time), with ``acceptance_source = submissions_json``;
+    DQ-02 found the two sources agree. With neither, the filing fails as
+    ``no_acceptance``.
+    """
     first, last = window_bounds(start, end)
     rows: list[dict[str, Any]] = []
     failures: list[tuple[str, int, str, int]] = []
     outside = 0
     for n, (folder, manifest) in enumerate(iter_manifests(raw_root), start=1):
-        accepted = datetime.fromisoformat(manifest["acceptance_ts_utc"])
+        source = "header"
+        if manifest["acceptance_ts_utc"]:
+            accepted = datetime.fromisoformat(manifest["acceptance_ts_utc"])
+        elif fallback and manifest["accession"] in fallback:
+            accepted, source = fallback[manifest["accession"]], "submissions_json"
+        else:
+            failures.append((manifest["accession"], int(manifest["cik"]), "no_acceptance", 0))
+            continue
         if not first <= accepted < last:
             outside += 1
             continue
-        result = extract_filing(folder, manifest, min_chars)
+        result = extract_filing(folder, manifest, min_chars, accepted, source)
         if result.row is None:
             failures.append(
                 (manifest["accession"], int(manifest["cik"]), str(result.failure), result.n_chars)
@@ -277,7 +304,11 @@ def header_table(raw_root: Path) -> pl.DataFrame:
             "accession": manifest["accession"],
             "header_items": list(manifest["items"]),
             "acceptance_raw": manifest["acceptance_raw"],
-            "acceptance_ts_utc": datetime.fromisoformat(manifest["acceptance_ts_utc"]),
+            "acceptance_ts_utc": (
+                datetime.fromisoformat(manifest["acceptance_ts_utc"])
+                if manifest["acceptance_ts_utc"]
+                else None
+            ),
             "primary_doc_url": next(
                 (
                     f"{_folder_url(manifest)}/{d['filename']}"
@@ -331,7 +362,8 @@ def acceptance_check(documents: pl.DataFrame, index: pl.DataFrame) -> dict[str, 
     sides).
     """
     joined = (
-        documents.select("native_id", "event_ts_utc")
+        documents.filter(pl.col("acceptance_source") == "header")
+        .select("native_id", "event_ts_utc")
         .join(
             index.select(pl.col("accession").alias("native_id"), "submissions_acceptance_utc"),
             on="native_id",

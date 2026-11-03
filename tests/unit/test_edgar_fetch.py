@@ -22,7 +22,7 @@ def index_headers_page(
         f"<SEC-HEADER>{accession}.hdr.sgml : 20240314\n<ACCEPTANCE-DATETIME>{acceptance}\n"
         f"<ACCESSION-NUMBER>{accession}\n<TYPE>8-K\n"
         + "".join(f"<ITEMS>{item}\n" for item in items)
-        + f"<FILING-DATE>{acceptance[:8]}\n<FILER>\n<COMPANY-DATA>\n<CONFORMED-NAME>Synthetic Co\n"
+        + f"<FILING-DATE>{acceptance[:8] or '20181001'}\n<FILER>\n<COMPANY-DATA>\n<CONFORMED-NAME>Synthetic Co\n"
         f"<CIK>{cik:010d}\n</COMPANY-DATA>\n<FORMER-COMPANY>\n<FORMER-CONFORMED-NAME>OLD CO\n"
         "</FORMER-COMPANY>\n</FILER>\n</SEC-HEADER>\n"
     )
@@ -119,3 +119,12 @@ def test_select_item202() -> None:
     )
     selected = edgar_fetch.select_item202(index, date(2016, 1, 1), date(2026, 9, 30))
     assert selected["accession"].to_list() == ["a", "d"]
+
+
+def test_empty_acceptance_is_kept_for_the_corpus_to_resolve(tmp_path: Path) -> None:
+    accession = "0000000001-18-000001"
+    page = index_headers_page(accession, 1, "", ["2.02"], DOCS[:2])
+    handler, _ = handler_for({accession: page})
+    client = SecClient(UA, max_rps=10, transport=httpx.MockTransport(handler))
+    manifest = edgar_fetch.fetch_filing(client, tmp_path, 1, accession)
+    assert manifest["acceptance_raw"] == "" and manifest["acceptance_ts_utc"] is None

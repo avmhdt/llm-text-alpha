@@ -129,3 +129,28 @@ def test_link_and_write(tmp_path: Path, efp_root: Path) -> None:
     paths = build.write_documents(linked, tmp_path / "documents")
     assert [p.parent.name for p in paths] == ["year=2016"]
     assert pl.read_parquet(paths[0]).height == 3
+
+
+def test_empty_header_acceptance_uses_the_submissions_time(tmp_path: Path) -> None:
+    good = {"e.htm": ("EX-99.1", f"<p>{LONG}</p>")}
+    write_filing(tmp_path, 1, "0000000001-18-000001", "", good)
+    write_filing(
+        tmp_path, 1, "0000000001-18-000002", "", {"e.htm": ("EX-99.1", f"<p>{LONG} 2</p>")}
+    )
+    fallback = {"0000000001-18-000001": datetime(2018, 10, 1, 20, 30, tzinfo=UTC)}
+    result = build.build_item202(tmp_path, date(2016, 1, 1), date(2026, 9, 30), fallback=fallback)
+    row = result.documents.row(0, named=True)
+    assert row["event_ts_utc"] == datetime(2018, 10, 1, 20, 30, tzinfo=UTC)
+    assert row["acceptance_source"] == "submissions_json"
+    assert result.failures["reason"].to_list() == ["no_acceptance"]
+    checked = build.acceptance_check(
+        result.documents,
+        pl.DataFrame(
+            {
+                "accession": ["0000000001-18-000001"],
+                "submissions_acceptance_utc": [datetime(2018, 10, 1, 20, 30, tzinfo=UTC)],
+            },
+            schema_overrides={"submissions_acceptance_utc": pl.Datetime("ns", "UTC")},
+        ),
+    )
+    assert checked["by_year"].is_empty()
