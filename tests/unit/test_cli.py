@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
+import polars as pl
 import pytest
 from typer.testing import CliRunner
 
@@ -47,7 +48,8 @@ def test_help_lists_groups() -> None:
 
 
 @pytest.mark.parametrize(
-    "args", [["data", "edgar-fetch"], ["score", "llm"], ["eval", "trials"], ["repro"]]
+    "args",
+    [["data", "prices"], ["corpus", "mask"], ["score", "llm"], ["eval", "trials"], ["repro"]],
 )
 def test_later_commands_say_when_they_arrive(args: list[str]) -> None:
     result = runner.invoke(cli.app, args)
@@ -108,15 +110,20 @@ def test_verify_repository_criteria(workdir: Path) -> None:
     assert "PASS" in result.output
     result = runner.invoke(cli.app, ["verify", "AC-W-12"])
     assert result.exit_code == 0, result.output
-    result = runner.invoke(cli.app, ["verify", "ac-w-01"])
+    result = runner.invoke(cli.app, ["verify", "ac-w-02"])
     assert result.exit_code == 0
-    assert "PENDING  ac-w-01: arrives in M2" in result.output
+    assert "PENDING  ac-w-02: arrives in M3" in result.output
     result = runner.invoke(cli.app, ["verify", "ac-x-99"])
     assert result.exit_code == 1
 
 
 def test_verify_all_runs_the_smoke(workdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "run_smoke", fake_smoke(True))
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "check_gate_properties",
+        lambda repo: cli.verify_mod.Outcome("ac-w-01", "pass", "stub"),
+    )
     result = runner.invoke(cli.app, ["verify", "all"])
     assert result.exit_code == 0, result.output
     assert "PASS     ac-w-04: 2 checks ok" in result.output
@@ -124,3 +131,67 @@ def test_verify_all_runs_the_smoke(workdir: Path, monkeypatch: pytest.MonkeyPatc
     result = runner.invoke(cli.app, ["verify", "ac-w-04"])
     assert result.exit_code == 1
     assert "failed: prices_one_month" in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["data", "edgar-fetch", "--doc-types", "10k_mdna"], ["corpus", "build", "--doc-types", "x"]],
+)
+def test_unsupported_doc_types(args: list[str]) -> None:
+    assert runner.invoke(cli.app, args).exit_code == 2
+
+
+@pytest.mark.parametrize(
+    "args", [["data", "edgar-index"], ["data", "edgar-fetch"], ["corpus", "build"]]
+)
+def test_ingest_commands_need_their_inputs(workdir: Path, args: list[str]) -> None:
+    result = runner.invoke(cli.app, args)
+    assert result.exit_code == 1
+    assert "error:" in result.output
+
+
+def test_corpus_build_end_to_end(
+    workdir: Path, monkeypatch: pytest.MonkeyPatch, efp_root: Path
+) -> None:
+    from tests.unit.test_corpus_build import LONG, write_filing
+
+    data = workdir / "data"
+    raw = data / "raw" / "edgar" / "filings"
+    for n, cik in enumerate((1000010, 1000021), start=1):
+        write_filing(
+            raw,
+            cik,
+            f"0000000001-16-00000{n}",
+            f"2016-03-0{n}T21:00:00+00:00",
+            {"e.htm": ("EX-99.1", f"<p>{LONG} {n}</p>")},
+        )
+    index = pl.DataFrame(
+        {
+            "cik": [1000010, 1000021],
+            "company_name": ["a", "b"],
+            "form": ["8-K", "8-K"],
+            "filed_date": [date(2016, 3, 1), date(2016, 3, 2)],
+            "accession": ["0000000001-16-000001", "0000000001-16-000002"],
+            "items": [["2.02"], ["2.02"]],
+            "submissions_acceptance_utc": [
+                datetime(2016, 3, 1, 21, tzinfo=UTC),
+                datetime(2016, 3, 2, 22, tzinfo=UTC),
+            ],
+        },
+        schema_overrides={"submissions_acceptance_utc": pl.Datetime("ns", "UTC")},
+    )
+    (data / "interim" / "edgar").mkdir(parents=True)
+    index.write_parquet(data / "interim" / "edgar" / "filings_index.parquet")
+    monkeypatch.setenv("EFP_DATA_DIR", str(efp_root))
+    result = runner.invoke(
+        cli.app, ["corpus", "build", "--start", "2016-01-01", "--end", "2016-12-31"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "2 documents; extraction success 100.00%" in result.output
+    by_year = (workdir / "reports" / "tables" / "dq02_acceptance_by_year.csv").read_text("utf-8")
+    assert by_year.startswith("# command=lta corpus build")
+    assert "2016,EST,2,1,1,0" in by_year
+    docs = pl.read_parquet(data / "interim" / "corpus" / "documents" / "**" / "*.parquet")
+    assert docs.height == 2
+    enriched = pl.read_parquet(data / "interim" / "edgar" / "filings_index.parquet")
+    assert enriched["acceptance_raw"].to_list() == ["x", "x"]

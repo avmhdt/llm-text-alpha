@@ -22,6 +22,8 @@ dependencies = [
     "pydantic-settings>=2.3",
     "pyyaml>=6",
     "structlog>=24.1",
+    "selectolax>=0.3",
+    "lxml>=5",
 ]
 
 [project.optional-dependencies]
@@ -75,7 +77,7 @@ files = ["src/llm_text_alpha"]
 mypy_path = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["exchange_calendars.*", "pyarrow.*"]
+module = ["exchange_calendars.*", "pyarrow.*", "lxml.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

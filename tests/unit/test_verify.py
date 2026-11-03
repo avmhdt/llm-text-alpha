@@ -63,3 +63,14 @@ def test_staged_file_guard(tmp_path: Path) -> None:
     )
     assert bad.returncode == 1
     assert bad.stderr.count("\n") == 3
+
+
+def test_gate_property_check_reports_pytest(tmp_path: Path) -> None:
+    target = tmp_path / "tests" / "property" / "test_gate.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def test_ok():\n    assert True\n", "utf-8")
+    outcome = verify.check_gate_properties(tmp_path)
+    assert outcome.status == "pass"
+    assert "1 passed" in outcome.detail
+    target.write_text("def test_bad():\n    assert False\n", "utf-8")
+    assert verify.check_gate_properties(tmp_path).status == "fail"

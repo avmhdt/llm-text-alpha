@@ -67,7 +67,7 @@ def test_threads_share_the_cap() -> None:
         for _ in range(10):
             bucket.acquire()
             with lock:
-                stamps.append(time.monotonic())
+                stamps.append(time.perf_counter())
 
     threads = [threading.Thread(target=work) for _ in range(4)]
     for thread in threads:
