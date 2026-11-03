@@ -1,0 +1,66 @@
+# Full experiment config (spec section 10). Values come from the spec defaults and the
+# owner's decisions (docs/decisions.md). Paths starting with data/ resolve under DATA_DIR.
+seed: 20261030
+universe:
+  top_n_by_mcap: 1000
+  share_codes: [10, 11]
+  start: 2016-01-01
+  end: 2026-09-30
+  estimation_data_start: 2015-01-01
+data:
+  price_provider: auto # D-01
+  sec_max_rps: 8
+corpus:
+  doc_types: [8k_item202] # D-10 primary; add 8k_other, 10k_mdna, 10q_mdna, news
+  exclude_amendments: true
+  min_chars: 200
+gate:
+  buffer_minutes: 5
+  calendar: XNYS
+  entry_price: open
+scorers:
+  lm:
+    dictionary_file: data/raw/lm/LM_MasterDictionary.csv
+    negation_window: 3
+  finbert:
+    model: ProsusAI/finbert
+    revision: null # pinned hash written back on first run
+    max_tokens: 512
+    stride: 64
+    device: auto
+    batch_size: 16
+  llm:
+    prompt: configs/prompts/score_v1.md
+    max_input_tokens: 3000 # truncation keeps the start of EX-99.1
+    max_output_tokens: 512
+    samples:
+      item202_main: {doc_type: 8k_item202, n: 20000, stratify: year, seed: 7}
+      item202_contam: {doc_type: 8k_item202, n: 3000, stratify: [year, cutoff_window], seed: 11}
+    runs:
+      - {provider: anthropic, model: claude-haiku-5-5, sample: item202_main, masked: [false, true], mode: batch}
+      - {provider: anthropic, model: claude-haiku-4-5, sample: item202_contam, masked: [false, true], mode: batch}
+      - {provider: local, model: llama-3.1-8b-instruct-q4_k_m, sample: item202_contam, masked: [false, true]}
+budget:
+  llm_budget_usd_env: LLM_BUDGET_USD # value comes from env; default 25
+  price_table: configs/llm_prices.yaml
+  max_price_table_age_days: 45
+masking:
+  config: configs/masking.yaml
+  version: m1
+evaluation:
+  ar_model: ff5umd
+  estimation_window: [-250, -30]
+  event_window: [-10, 60]
+  car_horizons: [1, 5, 20, 60]
+  quintiles_trailing_days: 252
+  bootstrap_reps: 1000
+  newey_west_lags: {fm: 3, portfolio: 10}
+  portfolio: {hold_days: [5, 20], weighting: equal}
+  costs: {bps_by_size_rank: {"1-200": 5, "201-500": 10, "501-1000": 20}, sensitivity_mult: [1.0, 2.0]}
+  capacity: {participation: 0.10, adv_days: 20, impact_coef: 0.1}
+contamination:
+  windows_from: configs/models.yaml
+  probes: {reidentify_n: 300, outcome_recall_n: 300}
+reporting:
+  figures_dir: reports/figures
+  tables_dir: reports/tables

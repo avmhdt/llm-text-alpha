@@ -1,0 +1,1 @@
+run_id,timestamp,git_sha,strategy_family,params_json,start,end,n_obs,sharpe_annual,returns_path,x_run_kind,x_periods_per_year,x_note

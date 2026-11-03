@@ -1,0 +1,35 @@
+# Smoke config: 10 filings, one month, fake LLM provider. `lta data smoke` reads the smoke
+# section. Acceptance values were recorded from each filing's SGML header on 2026-11-03 and
+# agree with the submissions JSON. The set covers EST and EDT, filings before the open,
+# during the session and after the close, a Good Friday (2016-03-25), the 2018-07-03 early
+# close, the weeks around DST changes, and filer-agent accession prefixes.
+seed: 20261030
+universe:
+  top_n_by_mcap: 1000
+  start: 2026-09-01
+  end: 2026-09-30
+corpus:
+  doc_types: [8k_item202]
+  exclude_amendments: true
+  min_chars: 200
+gate:
+  buffer_minutes: 5
+  calendar: XNYS
+  entry_price: open
+llm:
+  provider: fake
+smoke:
+  month: "2026-09"
+  max_securities: 50
+  free_tickers: [AAPL, MSFT, NKE, ORCL, COST, DAL, HD, WMT, KO, PG]
+  filings:
+    - {cik: 320193, accession: "0001193125-16-438421", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20160126163106", acceptance_ts_utc: "2016-01-26T21:31:06Z"} # Apple, EST, after close
+    - {cik: 320187, accession: "0000320187-16-000259", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20160325153412", acceptance_ts_utc: "2016-03-25T19:34:12Z"} # Nike, Good Friday
+    - {cik: 1341439, accession: "0001193125-17-083638", form: "8-K", items: ["2.02", "8.01", "9.01"], acceptance_raw: "20170315161106", acceptance_ts_utc: "2017-03-15T20:11:06Z"} # Oracle, EDT 3 days after spring-forward
+    - {cik: 909832, accession: "0001193125-17-069544", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20170303144702", acceptance_ts_utc: "2017-03-03T19:47:02Z"} # Costco, EST, during session
+    - {cik: 320193, accession: "0000320193-18-000142", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20181101163021", acceptance_ts_utc: "2018-11-01T20:30:21Z"} # Apple, EDT 3 days before fall-back
+    - {cik: 320187, accession: "0000320187-18-000065", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20180703143140", acceptance_ts_utc: "2018-07-03T18:31:40Z"} # Nike, after the 13:00 early close
+    - {cik: 27904, accession: "0001683168-19-000102", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20190115070014", acceptance_ts_utc: "2019-01-15T12:00:14Z"} # Delta, EST, before the open
+    - {cik: 354950, accession: "0000354950-20-000031", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20200519061547", acceptance_ts_utc: "2020-05-19T10:15:47Z"} # Home Depot, EDT, before the open
+    - {cik: 104169, accession: "0000104169-25-000177", form: "8-K", items: ["2.02", "3.01", "7.01", "9.01"], acceptance_raw: "20251120065846", acceptance_ts_utc: "2025-11-20T11:58:46Z"} # Walmart, four items
+    - {cik: 320193, accession: "0000320193-26-000024", form: "8-K", items: ["2.02", "9.01"], acceptance_raw: "20261102163023", acceptance_ts_utc: "2026-11-02T21:30:23Z"} # Apple, EST the day after fall-back

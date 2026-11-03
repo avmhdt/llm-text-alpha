@@ -2,7 +2,7 @@
 
 > Score filings, transcripts and news with language models, and prove the result is not leakage or memorization.
 
-**Status:** planning
+**Status:** in progress. M1 (scaffold, CI, data-access smoke test) is built; see [docs/decisions.md](docs/decisions.md).
 
 | | |
 |---|---|
@@ -54,3 +54,13 @@ Raw and licensed data live in `data/`, which is git-ignored. Only download scrip
 - How do you know the model didn’t already know what happened after the filing?
 - Is your signal just earnings surprise in disguise?
 - What is the capacity of an 8-K-driven strategy?
+
+## Quick start
+
+Data commands run under WSL, with data under `DATA_ROOT` on the ext4 filesystem. Copy `.env.example` to `.env` and fill it in first.
+
+```bash
+uv sync
+uv run lta data smoke
+uv run lta verify all
+```

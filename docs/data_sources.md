@@ -1,0 +1,10 @@
+# Data sources
+
+Licences, access dates and volumes. Raw and licensed data live under `DATA_ROOT`, outside git. Sections are added as each source is first used.
+
+| Source | Used from | Access | Licence and use here | Volume at last pull |
+|---|---|---|---|---|
+| SEC EDGAR (SGML headers, submissions JSON) | M1 | `www.sec.gov/Archives` and `data.sec.gov`, with `SEC_USER_AGENT`, at most `SEC_MAX_RPS` (8) requests per second | US government public data. Raw files stay out of git because of size | M1 smoke: 10 headers and 7 submissions files, 2026-11-03 |
+| Kenneth French Data Library | M1 | `F-F_Research_Data_5_Factors_2x3_daily_CSV.zip` and `F-F_Momentum_Factor_daily_CSV.zip` from `mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp` | Free to use with citation. Built from the 202609 CRSP database | 2026-11-03: 150 KB and 85 KB; daily rows 1963-07-01 to 2026-09-30 |
+| Sharadar Full History Bundle, through equity-factor-pipeline's `eqpit` store | M1 | `PitStore` over `equity-factor-pipeline/data/processed/pit`, built from the bundle pulled 2026-11-02 | Personal Use License; Sharadar confirmed in writing on 2026-10-31 that aggregate results and hosted coding tools are allowed. Only aggregates are published | Store covers 1997-12-31 to 2026-10-30 |
+| Sharadar API, direct | M1 key check; prices from M3 | `https://api.sharadar.com/v1.0`, key in the `x-api-key` header | As above | M1: one `stocks` row for the key check |
