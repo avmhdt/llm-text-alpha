@@ -157,4 +157,3 @@ def build_factors_daily(snapshot: Path) -> pl.DataFrame:
     if gaps:
         raise FactorFileError(f"momentum is missing on {gaps} FF5 dates")
     return joined.select("date", *FACTOR_COLUMNS)
-

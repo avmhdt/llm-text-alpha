@@ -84,7 +84,9 @@ class EfpPrices:
         if payload.get("label"):
             raise ProviderUnavailableError(f"eqpit store is labelled {payload['label']!r}")
         if payload.get("provider") not in self.accepted_sources:
-            raise ProviderUnavailableError(f"eqpit store was built from {payload.get('provider')!r}")
+            raise ProviderUnavailableError(
+                f"eqpit store was built from {payload.get('provider')!r}"
+            )
         return {
             "provider": payload.get("provider"),
             "first_date": payload.get("first_date"),
@@ -199,7 +201,9 @@ class FreePrices:
         frames = [
             read_stooq(item.path)
             .filter(pl.col("date").is_between(start, end))
-            .with_columns(pl.lit(item.ticker).alias("security_id"), pl.lit("free").alias("provider"))
+            .with_columns(
+                pl.lit(item.ticker).alias("security_id"), pl.lit("free").alias("provider")
+            )
             for item in index_stooq(self.stooq_dir)
             if item.ticker in wanted
         ]

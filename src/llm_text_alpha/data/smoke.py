@@ -176,7 +176,9 @@ def check_prices(
 
 
 def _span(table: pl.DataFrame) -> str:
-    first, last = table.select(pl.col("date").min().alias("first"), pl.col("date").max().alias("last")).row(0)
+    first, last = table.select(
+        pl.col("date").min().alias("first"), pl.col("date").max().alias("last")
+    ).row(0)
     return f"{first} to {last}"
 
 
@@ -192,7 +194,9 @@ def check_factors(
         settings.data_dir / "raw" / "factors", transport=transport, throttle=throttle
     )
     table = french.build_factors_daily(snapshot)
-    write_parquet_atomic(table, settings.data_dir / "processed" / "panels" / "factors_daily.parquet")
+    write_parquet_atomic(
+        table, settings.data_dir / "processed" / "panels" / "factors_daily.parquet"
+    )
     start, end = config.month_bounds()
     month = table.filter(pl.col("date").is_between(start, end))
     expected = _sessions(start, end)
