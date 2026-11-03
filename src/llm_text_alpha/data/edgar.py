@@ -259,12 +259,16 @@ def submissions_url(cik: int) -> str:
 
 @dataclass(frozen=True)
 class FilingHeader:
-    """Fields read from an SGML header. ``acceptance_ts_utc`` is the event time (DQ-01)."""
+    """Fields read from an SGML header. ``acceptance_ts_utc`` is the event time (DQ-01).
+
+    A few EDGAR headers carry an empty ``<ACCEPTANCE-DATETIME>``; with
+    ``require_acceptance=False`` those parse with ``acceptance_raw == ""`` and no time.
+    """
 
     accession: str
     form: str
     acceptance_raw: str
-    acceptance_ts_utc: datetime
+    acceptance_ts_utc: datetime | None
     filed_date: date
     items: tuple[str, ...]
     ciks: tuple[int, ...]
@@ -284,7 +288,7 @@ class HeaderParseError(ValueError):
 _TAG = re.compile(r"^<([A-Z0-9-]+)>(.*)$")
 
 
-def parse_header(text: str) -> FilingHeader:
+def parse_header(text: str, require_acceptance: bool = True) -> FilingHeader:
     """Parse an EDGAR ``.hdr.sgml`` (or the header block of a full submission).
 
     Items keep EDGAR's numbering, such as ``2.02``. The company name is the first filer's,
@@ -305,11 +309,15 @@ def parse_header(text: str) -> FilingHeader:
     accession = first("ACCESSION-NUMBER")
     if not _ACCESSION.match(accession):
         raise HeaderParseError(f"malformed accession {accession!r}")
-    acceptance_raw = first("ACCEPTANCE-DATETIME")
-    try:
-        acceptance = parse_acceptance(acceptance_raw)
-    except TimestampError as exc:
-        raise HeaderParseError(str(exc)) from exc
+    acceptance_raw = values.get("ACCEPTANCE-DATETIME", [""])[0]
+    acceptance: datetime | None = None
+    if acceptance_raw:
+        try:
+            acceptance = parse_acceptance(acceptance_raw)
+        except TimestampError as exc:
+            raise HeaderParseError(str(exc)) from exc
+    elif require_acceptance:
+        raise HeaderParseError("header has no <ACCEPTANCE-DATETIME>")
     filed = datetime.strptime(first("FILING-DATE"), "%Y%m%d").date()
     if "CIK" not in values:
         raise HeaderParseError("header has no <CIK>")

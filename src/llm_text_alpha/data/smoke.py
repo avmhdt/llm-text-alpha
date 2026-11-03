@@ -113,7 +113,9 @@ def check_edgar(
                     "form": header.form,
                     "items": list(header.items),
                     "acceptance_raw": header.acceptance_raw,
-                    "acceptance_ts_utc": header.acceptance_ts_utc.isoformat(),
+                    "acceptance_ts_utc": (
+                        header.acceptance_ts_utc.isoformat() if header.acceptance_ts_utc else None
+                    ),
                     "matches_fixture": same,
                     "submissions_ts_utc": json_ts.isoformat() if json_ts else None,
                 }

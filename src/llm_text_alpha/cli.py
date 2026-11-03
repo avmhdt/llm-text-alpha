@@ -216,7 +216,9 @@ def corpus_build(
     headers = corpus.header_table(raw)
     index = index.drop([c for c in headers.columns if c != "accession" and c in index.columns])
     write_parquet_atomic(index.join(headers, on="accession", how="left"), index_path)
-    result = corpus.build_item202(raw, first, last, min_chars)
+    known = index.filter(pl.col("submissions_acceptance_utc").is_not_null())
+    fallback = dict(zip(known["accession"], known["submissions_acceptance_utc"], strict=True))
+    result = corpus.build_item202(raw, first, last, min_chars, fallback)
     linked = corpus.link_documents(
         result.documents, settings.efp_root / "processed" / "pit", universe.top_n_by_mcap
     )

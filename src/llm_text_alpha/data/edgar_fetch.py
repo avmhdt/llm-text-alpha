@@ -64,7 +64,7 @@ def parse_index_headers(page: str) -> tuple[FilingHeader, list[DocumentEntry]]:
     end = text.find("</SEC-HEADER>")
     if end < 0:
         raise ValueError("index-headers page has no </SEC-HEADER>")
-    header = parse_header(text[:end])
+    header = parse_header(text[:end], require_acceptance=False)
     documents = [
         DocumentEntry(m.group(1).strip(), int(m.group(2)), m.group(3).strip())
         for m in _DOCUMENT.finditer(text[end:])
@@ -127,7 +127,9 @@ def fetch_filing(
         "form": header.form,
         "items": list(header.items),
         "acceptance_raw": header.acceptance_raw,
-        "acceptance_ts_utc": header.acceptance_ts_utc.isoformat(),
+        "acceptance_ts_utc": (
+            header.acceptance_ts_utc.isoformat() if header.acceptance_ts_utc else None
+        ),
         "filed_date": header.filed_date.isoformat(),
         "ciks": list(header.ciks),
         "company_name": header.company_name,
