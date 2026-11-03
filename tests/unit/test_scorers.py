@@ -175,3 +175,22 @@ def test_download_model_pins_and_reuses(tmp_path: Path) -> None:
     count = len(seen)
     finbert.download_model(tmp_path, revision="abc123", transport=transport)
     assert len(seen) == count
+
+
+def test_install_writes_a_manifest(tmp_path: Path) -> None:
+    source = tmp_path / "Loughran-McDonald_MasterDictionary_test.csv"
+    source.write_text(MINI, "utf-8")
+    target = tmp_path / "raw" / "lm" / "LM_MasterDictionary.csv"
+    manifest = dictionary.install_dictionary(source, target)
+    saved = json.loads((target.parent / "manifest.json").read_text("utf-8"))
+    assert saved == manifest
+    assert manifest["source_file"] == source.name
+    assert manifest["n_bytes"] == source.stat().st_size
+    assert manifest["words"] == {
+        "positive": 2,
+        "negative": 3,
+        "uncertainty": 1,
+        "litigious": 1,
+        "constraining": 1,
+    }
+    assert target.read_bytes() == source.read_bytes()

@@ -355,11 +355,11 @@ def data_lm_dict(
     settings, _ = _start("data lm-dict", run_id)
     target = settings.data_path(load_yaml(config)["scorers"]["lm"]["dictionary_file"])
     if path is not None:
-        lm = dictionary.load_dictionary(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(path.read_bytes())
-    else:
-        lm = dictionary.load_dictionary(target)
+        manifest = dictionary.install_dictionary(path, target)
+        typer.echo(
+            f"installed {path.name}, sha256 {manifest['sha256']}, {manifest['n_bytes']} bytes"
+        )
+    lm = dictionary.load_dictionary(target)
     sizes = ", ".join(f"{k} {len(v)}" for k, v in lm.words.items())
     typer.echo(f"{lm.model_id}: {sizes}")
 

@@ -121,3 +121,32 @@ def score_documents(
             }
         )
     return pl.DataFrame(rows, schema=SCORES_SCHEMA)
+
+
+SRAF_URL = "https://sraf.nd.edu/loughranmcdonald-master-dictionary/"
+
+
+def install_dictionary(source: Path, target: Path, source_url: str = SRAF_URL) -> dict[str, object]:
+    """Validate ``source``, copy it to ``target`` and write ``manifest.json`` beside it.
+
+    The manifest records the file's SHA-256, size, original name, where it came from and
+    the word count per category. The copy is atomic; the file itself stays out of git.
+    """
+    lm = load_dictionary(source)
+    content = source.read_bytes()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp")
+    temporary.write_bytes(content)
+    temporary.replace(target)
+    manifest: dict[str, object] = {
+        "source_file": source.name,
+        "source_url": source_url,
+        "obtained_by": "owner, accepting SRAF's terms (P-14 ruling 2026-11-03)",
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "n_bytes": len(content),
+        "installed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "model_id": load_dictionary(target).model_id,
+        "words": {category: len(words) for category, words in lm.words.items()},
+    }
+    (target.parent / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", "utf-8")
+    return manifest
