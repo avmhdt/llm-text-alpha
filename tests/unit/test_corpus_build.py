@@ -123,6 +123,7 @@ def test_link_and_write(tmp_path: Path, efp_root: Path) -> None:
     assert rows[1000010]["in_universe"] and rows[1000010]["universe_rank"] == 1
     assert rows[1000010]["universe_month_end"] == date(2016, 2, 29)
     assert rows[1000010]["ticker"] == "S10"
+    assert rows[1000010]["permno"] == 10
     assert rows[1000021]["security_id"] == "SYN:22"
     assert rows[4242]["security_id"] is None and not rows[4242]["in_universe"]
     paths = build.write_documents(linked, tmp_path / "documents")

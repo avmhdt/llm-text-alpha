@@ -21,6 +21,7 @@ import structlog
 from llm_text_alpha.corpus.parse import extract_text
 from llm_text_alpha.corpus.timestamps import NEW_YORK
 from llm_text_alpha.data.edgar_fetch import DONE, ITEM_202
+from llm_text_alpha.ids import permno_of
 
 log = structlog.get_logger(__name__)
 
@@ -182,7 +183,8 @@ def mark_duplicates(documents: pl.DataFrame) -> pl.DataFrame:
 def link_documents(documents: pl.DataFrame, pit_root: Path, top_n: int) -> pl.DataFrame:
     """Add ``permno``, ``ticker``, ``security_id`` and universe membership as of each event.
 
-    ``permno`` is Sharadar's permaticker (section 7b allows a provider id). The security is
+    ``permno`` is the number in the security id, Sharadar's permaticker for ``SHR:<n>``
+    (section 7b allows a provider id). The security is
     the company's highest-ranked one in eqpit's universe at the last month end before the
     event, else its first common security valid on the event date. ``in_universe`` is DQ-06:
     the company ranked in the top ``top_n`` at that month end. Unlinked documents keep null
@@ -219,7 +221,7 @@ def link_documents(documents: pl.DataFrame, pit_root: Path, top_n: int) -> pl.Da
         [
             store.securities(day)
             .filter(pl.col("cik").is_not_null())
-            .select("security_id", "cik", "permaticker", "ticker", "share_type")
+            .select("security_id", "cik", "ticker", "share_type")
             .with_columns(pl.lit(day).alias("_day"))
             for day in days
         ]
@@ -243,11 +245,12 @@ def link_documents(documents: pl.DataFrame, pit_root: Path, top_n: int) -> pl.Da
             pl.col("rank").alias("universe_rank"),
         )
         .join(
-            securities.select("security_id", "_day", "permaticker", "ticker"),
+            securities.select("security_id", "_day", "ticker"),
             on=["security_id", "_day"],
             how="left",
         )
-        .rename({"permaticker": "permno", "_month_end": "universe_month_end"})
+        .with_columns(permno_of(pl.col("security_id")).alias("permno"))
+        .rename({"_month_end": "universe_month_end"})
         .drop("_day", "_universe_security", "_fallback_security", "rank")
     )
     return linked.sort("event_ts_utc", "doc_id")
