@@ -60,3 +60,65 @@ The gate takes each control from the latest row dated strictly before the entry 
 - **Extraction:** it succeeds when the text has at least 200 characters. Failures keep their reason. Counts are in [`reports/tables/corpus_item202.md`](../reports/tables/corpus_item202.md).
 - **Duplicates and amendments:** an exact duplicate of an earlier text (same `text_sha256`) is marked `excluded`, and so is any amendment. The gate drops both. When one firm has several documents entering on one date, the gate merges them into a single event: the mean score and the earliest timestamp.
 - **Identifiers:** each document is linked as of its event date through eqpit's `PitStore`. `in_universe` is DQ-06's eligibility: the company ranked in the top 1,000 at the month end before the event.
+
+## Returns, controls and baselines (M3)
+
+### Prices and universe (FR-03, DQ-06, DQ-07)
+
+`lta data prices` reads equity-factor-pipeline's Sharadar-built store through `PitStore` (D-01: `PRICE_PROVIDER=auto` resolves to `efp`). It writes three tables:
+
+- `universe_monthly`: the top 1,000 at each month end.
+- `link_table`.
+- `prices_daily`: every security in the universe at any month end from December 2015 to September 2026, with prices from 2015-01-02.
+
+`open` and `close` are unadjusted. `ret` is the split- and distribution-aware total return, and the entry day earns `close / open - 1`. eqpit exposes daily delisting returns only inside its monthly labels, and Sharadar has no delisting-return field. So daily returns stop at the last trade, and a window more than 20% short is dropped (DQ-14).
+
+### Controls (DQ-08)
+
+Each control is the value known at the close of its date. The gate takes the row dated before entry.
+
+- `size_log`: log market cap.
+- `mom_12_2`: compounded return over sessions 252 to 22 before the date, the daily form of months t-12 to t-2.
+- `bm`: the latest public book equity over market cap.
+- `sue`: the latest SUE whose EPS filing was public by the close.
+
+`sue_announced` is the SUE of the quarter the 8-K announces. Its EPS appears in the press release, but the value used here comes from the 10-Q or 10-K filed later. That makes it DQ-08's labelled exception, and it enters only as a robustness control.
+
+### SUE (FR-05)
+
+Quarterly diluted EPS comes from monthly `PitStore` snapshots, taking each quarter's value from the first snapshot that holds it. SUE is the seasonal random walk: the change from the same quarter a year earlier, over the standard deviation of the previous eight such changes, with at least six required.
+
+A quarter's announcement is the company's last Item 2.02 8-K after the quarter end and no later than a day after its EPS filing. Without one, the EPS filing's time stands in.
+
+### Abnormal returns (FR-15, DQ-09)
+
+For each event, OLS of excess returns on FF5 and momentum over sessions -250 to -30 gives `exp_ret = rf + alpha + beta' f`. Fewer than 120 valid returns falls back to the market model (`rf + mktrf`), and the event is flagged. `rel_day` 0 is the entry session.
+
+### Event study (FR-16)
+
+Quintiles come from trailing 252-session breakpoints of each scorer's own scores (DQ-10). CAARs cumulate from day -10. There are three bands:
+
+- Cross-sectional t.
+- Boehmer-Musumeci-Poulsen, converted to return units with the mean scale.
+- A firm-clustered bootstrap with 1,000 draws.
+
+The Kolari-Pynnonen adjustment uses the mean correlation of standardized estimation residuals. The pairs are sampled events whose estimation windows overlap by 60 sessions or more.
+
+### Regressions (FR-17)
+
+The dependent variable is `CAR[0,k]` for k = 1, 5, 20 and 60, regressed on `score_z` under five specifications:
+
+1. Score alone.
+2. Size and momentum.
+3. Size, momentum and SUE.
+4. All of those plus book-to-market.
+5. Size and momentum with `sue_announced` in place of SUE.
+
+Each runs as pooled OLS with standard errors clustered by firm and entry date, and as monthly Fama-MacBeth with Newey-West errors at lag 3. Both match `linearmodels` within NFR-03's tolerances (`tests/unit/test_regressions.py`).
+
+### Baseline scorers (FR-08, FR-09)
+
+When a filing has EX-99 exhibits, both baselines read those rather than the cover page.
+
+- **Loughran-McDonald:** counts Positive, Negative, Uncertainty, Litigious and Constraining words. A positive word is not counted when "no", "not" or "never" appears among the three words before it. `score = (pos - neg) / (pos + neg + 1)`.
+- **FinBERT:** `ProsusAI/finbert` at a pinned revision, over 512-token chunks that overlap by 64. It reads the first seven chunks, about 3,100 word pieces, close to the LLM's 3,000-token budget. The ablation therefore compares models on the same reading length. `score = P(positive) - P(negative)`.

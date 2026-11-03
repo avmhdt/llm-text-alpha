@@ -489,6 +489,19 @@ def verify(
     checks = {
         "ac-w-04": ac_w_04,
         "ac-w-01": lambda: verify_mod.check_gate_properties(repo),
+        "ac-w-02": lambda: verify_mod.check_figures(
+            repo / "reports" / "figures", ["lm", "finbert"]
+        ),
+        "ac-w-07": lambda: verify_mod.run_pytest(
+            "ac-w-07",
+            repo,
+            ["tests/unit/test_abnormal.py", "tests/integration/test_event_study_planted.py"],
+        ),
+        "ac-w-08": lambda: verify_mod.run_pytest(
+            "ac-w-08",
+            repo,
+            ["tests/unit/test_regressions.py", "tests/integration/test_null_rejection.py"],
+        ),
         "ac-w-11": lambda: verify_mod.check_trial_log(repo / DEFAULT_LOG),
         "ac-w-12": lambda: verify_mod.check_hygiene(repo),
     }
