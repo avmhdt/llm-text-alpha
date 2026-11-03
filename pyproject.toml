@@ -24,6 +24,11 @@ dependencies = [
     "structlog>=24.1",
     "selectolax>=0.3",
     "lxml>=5",
+    "statsmodels>=0.14",
+    "linearmodels>=6.0",
+    "matplotlib>=3.9",
+    "torch>=2.4",
+    "transformers>=4.44",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +51,12 @@ allow-direct-references = true
 [tool.uv.sources]
 eqpit = { git = "https://github.com/avmhdt/equity-factor-pipeline", subdirectory = "packages/eqpit", rev = "2ee3583274ed544ac009fc894283ac69ed422a2f" }
 overfitlab = { git = "https://github.com/avmhdt/backtest-overfitting-lab", rev = "ab5bf0c" }
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = [

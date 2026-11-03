@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import polars as pl
 import structlog
 import typer
 
+from llm_text_alpha import pipeline
 from llm_text_alpha import verify as verify_mod
 from llm_text_alpha.config import (
     DEFAULT_CONFIG,
@@ -27,20 +28,35 @@ from llm_text_alpha.data import edgar_index
 from llm_text_alpha.data import factors as french
 from llm_text_alpha.data.edgar import SecClient
 from llm_text_alpha.data.edgar_fetch import fetch_all, select_item202
-from llm_text_alpha.data.prices import EfpPrices
+from llm_text_alpha.data.prices import EfpPrices, resolve_provider
 from llm_text_alpha.data.ratelimit import ByteThrottle
 from llm_text_alpha.data.smoke import run_smoke, smoke_report_path
 from llm_text_alpha.io import write_parquet_atomic
 from llm_text_alpha.logging import configure_logging, log_path
 from llm_text_alpha.reporting.tables import write_table
+from llm_text_alpha.scoring import dictionary, finbert
 from llm_text_alpha.settings import DataPlacementError, Settings, check_data_placement, get_settings
 from llm_text_alpha.tracking.trial_log import DEFAULT_LOG, new_run_id
+
+if TYPE_CHECKING:
+    from eqpit.store import PitStore
 
 app = typer.Typer(help="LLM and NLP alpha with point-in-time discipline.", no_args_is_help=True)
 data_app = typer.Typer(help="Download and ingest data (section 7e).", no_args_is_help=True)
 app.add_typer(data_app, name="data")
 corpus_app = typer.Typer(help="Build, mask and audit the timestamped corpus.", no_args_is_help=True)
 app.add_typer(corpus_app, name="corpus")
+signals_app = typer.Typer(help="Build signals through the timestamp gate.", no_args_is_help=True)
+app.add_typer(signals_app, name="signals")
+eval_app = typer.Typer(
+    help="Evaluation: abnormal returns, event studies, regressions, portfolios.",
+    no_args_is_help=True,
+)
+app.add_typer(eval_app, name="eval")
+score_app = typer.Typer(
+    help="Score documents with the dictionary, FinBERT and LLMs.", no_args_is_help=True
+)
+app.add_typer(score_app, name="score")
 
 LOGS_DIR = Path("logs")
 ConfigOpt = Annotated[Path, typer.Option("--config", help="Experiment config YAML.")]
@@ -217,6 +233,241 @@ def corpus_build(
     typer.echo(f"{result.documents.height} documents; extraction success {rate:.2%}")
 
 
+@score_app.command("dict")
+def score_dict(
+    doc_types: Annotated[str, typer.Option(help="Document types.")] = "8k_item202",
+    masked: Annotated[bool, typer.Option(help="Score masked text (M6).")] = False,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Loughran-McDonald scores for every scorable document (FR-08)."""
+    if masked:
+        typer.echo("error: masked text arrives in M6", err=True)
+        raise typer.Exit(2)
+    settings, _ = _start("score dict", run_id)
+    cfg = load_yaml(config)["scorers"]["lm"]
+    lm = dictionary.load_dictionary(settings.data_path(cfg["dictionary_file"]))
+    paths = pipeline.Paths.of(settings)
+    docs = pipeline.scorable(pipeline.load_documents(paths)).filter(pl.col("doc_type") == doc_types)
+    scores = dictionary.score_documents(docs, lm, int(cfg.get("negation_window", 3)))
+    write_parquet_atomic(scores, paths.scores("lm") / "part-00000.parquet")
+    typer.echo(f"{scores.height} documents scored with {lm.model_id}")
+
+
+@score_app.command("finbert")
+def score_finbert(
+    doc_types: Annotated[str, typer.Option(help="Document types.")] = "8k_item202",
+    masked: Annotated[bool, typer.Option(help="Score masked text (M6).")] = False,
+    device: Annotated[str, typer.Option(help="auto, cpu or cuda.")] = "auto",
+    batch_size: Annotated[int, typer.Option(help="Chunks per forward pass.")] = 16,
+    threads: Annotated[int, typer.Option(help="Torch threads; modest on a shared PC.")] = 8,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """FinBERT scores, resumable; the model revision is pinned on first run (FR-09)."""
+    if masked:
+        typer.echo("error: masked text arrives in M6", err=True)
+        raise typer.Exit(2)
+    settings, _ = _start("score finbert", run_id)
+    cfg = load_yaml(config)["scorers"]["finbert"]
+    paths = pipeline.Paths.of(settings)
+    folder, revision = finbert.download_model(paths.models, cfg["model"], cfg.get("revision"))
+    model = finbert.FinBert(
+        folder,
+        f"{cfg['model']}@{revision}",
+        device=device,
+        threads=threads,
+        batch_size=batch_size,
+        max_tokens=int(cfg["max_tokens"]),
+        stride=int(cfg["stride"]),
+        max_chunks=cfg.get("max_chunks"),
+    )
+    docs = pipeline.scorable(pipeline.load_documents(paths)).filter(pl.col("doc_type") == doc_types)
+    scored = finbert.score_resumable(model, docs, paths.scores("finbert"))
+    typer.echo(f"{scored} documents scored this run with {model.model_id}")
+
+
+def _efp_store(settings: Settings) -> PitStore:
+    from eqpit.store import PitStore
+
+    if settings.efp_root is None:
+        typer.echo("error: this step reads eqpit's store; set EFP_DATA_DIR", err=True)
+        raise typer.Exit(1)
+    return PitStore.open(settings.efp_root / "processed" / "pit")
+
+
+@data_app.command("prices")
+def data_prices(
+    provider: Annotated[str, typer.Option(help="auto, efp, sharadar, crsp or free.")] = "auto",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Build prices_daily, universe_monthly and link_table (FR-03)."""
+    settings, _ = _start("data prices", run_id)
+    chosen = resolve_provider(settings, provider)
+    if not isinstance(chosen, EfpPrices):
+        typer.echo(f"error: panels come from efp in this milestone, not {chosen.name}", err=True)
+        raise typer.Exit(1)
+    universe = load_universe(config)
+    last = date.fromisoformat(str(chosen.check()["last_date"]))
+    counts = pipeline.build_panels(
+        _efp_store(settings),
+        pipeline.Paths.of(settings),
+        universe.start - timedelta(days=31),
+        universe.end,
+        universe.estimation_data_start or universe.start,
+        last,
+        universe.top_n_by_mcap,
+    )
+    typer.echo(", ".join(f"{k} {v}" for k, v in counts.items()))
+
+
+@data_app.command("earnings")
+def data_earnings(
+    method: Annotated[str, typer.Option(help="srw (seasonal random walk).")] = "srw",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Build earnings with SUE and announcement times, and book equity (FR-05)."""
+    if method != "srw":
+        typer.echo("error: only srw; I/B/E/S needs WRDS, which the owner does not have", err=True)
+        raise typer.Exit(2)
+    settings, _ = _start("data earnings", run_id)
+    universe = load_universe(config)
+    start = (universe.estimation_data_start or universe.start) - timedelta(days=3 * 366)
+    earnings = pipeline.build_earnings(
+        _efp_store(settings), pipeline.Paths.of(settings), start, universe.end
+    )
+    with_sue = earnings["sue"].is_not_null().sum()
+    linked = (earnings["announce_source"] == "8k_item202").sum()
+    typer.echo(
+        f"{earnings.height} company-quarters, {with_sue} with SUE, {linked} linked to an 8-K"
+    )
+
+
+@data_app.command("lm-dict")
+def data_lm_dict(
+    path: Annotated[Path | None, typer.Option(help="Master Dictionary CSV to install.")] = None,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Validate the Loughran-McDonald Master Dictionary and copy it to data/raw/lm/ (P-14)."""
+    settings, _ = _start("data lm-dict", run_id)
+    target = settings.data_path(load_yaml(config)["scorers"]["lm"]["dictionary_file"])
+    if path is not None:
+        lm = dictionary.load_dictionary(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
+    else:
+        lm = dictionary.load_dictionary(target)
+    sizes = ", ".join(f"{k} {len(v)}" for k, v in lm.words.items())
+    typer.echo(f"{lm.model_id}: {sizes}")
+
+
+@signals_app.command("build")
+def signals_build(
+    scorers: Annotated[str, typer.Option(help="Comma-separated scorers.")] = "lm,finbert,sue",
+    buffer_min: Annotated[int, typer.Option(help="Minutes between publication and entry.")] = 5,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Run the timestamp gate and trailing standardization; fails on any violation (FR-07)."""
+    settings, _ = _start("signals build", run_id)
+    signals = pipeline.build_signals(pipeline.Paths.of(settings), scorers.split(","), buffer_min)
+    counts = signals.group_by("scorer").len().sort("scorer")
+    typer.echo(", ".join(f"{s} {n}" for s, n in counts.iter_rows()) + " signals")
+
+
+@eval_app.command("abnormal")
+def eval_abnormal(
+    model: Annotated[str, typer.Option(help="ff5umd, market or raw.")] = "ff5umd",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Abnormal returns for every gated event (FR-15); drop counts go to drops.csv."""
+    from llm_text_alpha.evaluation.abnormal import drop_counts
+
+    if model not in ("ff5umd", "market", "raw"):
+        typer.echo("error: --model is ff5umd, market or raw", err=True)
+        raise typer.Exit(2)
+    settings, resolved = _start("eval abnormal", run_id)
+    cfg = load_yaml(config)["evaluation"]
+    paths = pipeline.Paths.of(settings)
+    est = (int(cfg["estimation_window"][0]), int(cfg["estimation_window"][1]))
+    window = (int(cfg["event_window"][0]), int(cfg["event_window"][1]))
+    counts = pipeline.run_abnormal(paths, model, est, window)  # type: ignore[arg-type]
+    events = pl.read_parquet(paths.abnormal / f"model={model}" / "events.parquet")
+    write_table(
+        drop_counts(events),
+        Path("reports/tables"),
+        "drops",
+        f"lta eval abnormal --model {model}",
+        resolved,
+    )
+    typer.echo(f"{counts['events']} events, {counts['kept']} kept")
+
+
+def _report(command: str, run_id: str, config: Path) -> pipeline.Report:
+    cfg = load_yaml(config).get("reporting", {})
+    return pipeline.Report(
+        tables=Path(cfg.get("tables_dir", "reports/tables")),
+        figures=Path(cfg.get("figures_dir", "reports/figures")),
+        trial_log=DEFAULT_LOG,
+        command=command,
+        run_id=run_id,
+    )
+
+
+@eval_app.command("event-study")
+def eval_event_study(
+    scorers: Annotated[str, typer.Option(help="Comma-separated scorers.")] = "lm,finbert,sue",
+    model: Annotated[str, typer.Option(help="Abnormal-return model.")] = "ff5umd",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """CAAR by trailing quintile with t, BMP and bootstrap bands, one figure per scorer."""
+    settings, resolved = _start("eval event-study", run_id)
+    cfg = load_yaml(config)
+    report = _report(f"lta eval event-study --scorers {scorers}", resolved, config)
+    for scorer in scorers.split(","):
+        summary = pipeline.run_event_study(
+            pipeline.Paths.of(settings),
+            scorer,
+            model,
+            report,
+            int(cfg["seed"]),
+            int(cfg["evaluation"]["bootstrap_reps"]),
+            list(cfg["evaluation"]["car_horizons"]),
+        )
+        row = summary.filter((pl.col("group") == "Q5-Q1") & (pl.col("horizon") == "CAR[0,5]"))
+        if row.height:
+            typer.echo(f"{scorer}: Q5-Q1 CAR[0,5] {row['car'][0]:.4%} (t {row['t'][0]:.2f})")
+
+
+@eval_app.command("regress")
+def eval_regress(
+    scorers: Annotated[str, typer.Option(help="Comma-separated scorers.")] = "lm,finbert",
+    horizons: Annotated[str, typer.Option(help="k in CAR[0,k].")] = "1,5,20,60",
+    se: Annotated[str, typer.Option(help="twoway, fm, or both.")] = "both",
+    model: Annotated[str, typer.Option(help="Abnormal-return model.")] = "ff5umd",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """CAR[0,k] on score_z with size, momentum and SUE controls (FR-17)."""
+    settings, resolved = _start("eval regress", run_id)
+    report = _report(f"lta eval regress --scorers {scorers} --se {se}", resolved, config)
+    methods = ["twoway", "fm"] if se == "both" else [se]
+    table = pipeline.run_regressions(
+        pipeline.Paths.of(settings),
+        scorers.split(","),
+        model,
+        [int(k) for k in horizons.split(",")],
+        report,
+        methods,
+    )
+    typer.echo(f"{table.height} regressions written to {report.tables / 'regressions.md'}")
+
+
 @app.command("verify")
 def verify(
     ac_id: Annotated[str, typer.Argument(help="Criterion id such as ac-w-11, or 'all'.")],
@@ -259,9 +510,6 @@ def _placeholder(group: typer.Typer, name: str, milestone: str, summary: str) ->
 
 _LATER: dict[str, list[tuple[str, str, str]]] = {
     "data": [
-        ("prices", "M3", "Build prices_daily, universe_monthly and link_table"),
-        ("earnings", "M3", "Build earnings with SUE"),
-        ("lm-dict", "M3", "Load and validate the Loughran-McDonald dictionary"),
         ("gdelt", "M5", "Stream GDELT GKG records matched to the universe"),
     ],
     "corpus": [
@@ -269,8 +517,6 @@ _LATER: dict[str, list[tuple[str, str, str]]] = {
         ("audit-mask", "M6", "Report residual masking hits"),
     ],
     "score": [
-        ("dict", "M3", "Loughran-McDonald dictionary scores"),
-        ("finbert", "M3", "FinBERT scores"),
         ("llm", "M4", "LLM scores through the provider abstraction"),
     ],
     "llm": [
@@ -278,11 +524,7 @@ _LATER: dict[str, list[tuple[str, str, str]]] = {
         ("spend", "M4", "Print ledger totals against LLM_BUDGET_USD"),
         ("batches", "M4", "Resume open batches"),
     ],
-    "signals": [("build", "M2", "Run the timestamp gate")],
     "eval": [
-        ("abnormal", "M3", "Abnormal returns"),
-        ("event-study", "M3", "Event study with confidence bands"),
-        ("regress", "M3", "Cross-sectional and Fama-MacBeth regressions"),
         ("portfolio", "M5", "Calendar-time long-short portfolio"),
         ("ablation", "M5", "Ablation on the intersection event set"),
         ("contamination", "M6", "Contamination protocol"),
@@ -294,18 +536,16 @@ _LATER: dict[str, list[tuple[str, str, str]]] = {
 }
 
 _GROUP_HELP = {
-    "score": "Score documents with the dictionary, FinBERT and LLMs.",
     "llm": "LLM spend estimates, ledger and batches.",
-    "signals": "Build signals through the timestamp gate.",
-    "eval": "Evaluation: abnormal returns, event studies, regressions, portfolios.",
     "report": "Regenerate figures and tables.",
 }
 
 for _group_name, _commands in _LATER.items():
-    _group = {"data": data_app, "corpus": corpus_app}.get(_group_name) or typer.Typer(
+    _known = {"data": data_app, "corpus": corpus_app, "score": score_app, "eval": eval_app}
+    _group = _known.get(_group_name) or typer.Typer(
         help=_GROUP_HELP[_group_name], no_args_is_help=True
     )
-    if _group_name not in ("data", "corpus"):
+    if _group_name not in _known:
         app.add_typer(_group, name=_group_name)
     for _name, _milestone, _summary in _commands:
         _placeholder(_group, _name, _milestone, _summary)

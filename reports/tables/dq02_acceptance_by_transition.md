@@ -1,0 +1,5 @@
+<!-- command=lta corpus build --doc-types 8k_item202 | run_id=8f91c3ed-4b5f-4f15-bf10-f3c043daf9f3 | git_sha=641db3952afd810ab248087bbe7adbcfbe915324-dirty | provider=licensed -->
+
+| transition | kind | filings_within_7d | agree | disagree |
+|---|---|---|---|---|
+| 2016-03-13 | spring_forward | 71 | 71 | 0 |

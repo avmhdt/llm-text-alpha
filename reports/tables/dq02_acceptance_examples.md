@@ -1,0 +1,6 @@
+<!-- command=lta corpus build --doc-types 8k_item202 | run_id=8f91c3ed-4b5f-4f15-bf10-f3c043daf9f3 | git_sha=641db3952afd810ab248087bbe7adbcfbe915324-dirty | provider=licensed -->
+
+| transition | kind | accession | regime | header_utc | submissions_utc | agree |
+|---|---|---|---|---|---|---|
+| 2016-03-13 | spring_forward | 0000936340-16-000286 | EST | 2016-03-11T21:17:10Z | 2016-03-11T21:17:10Z | True |
+| 2016-03-13 | spring_forward | 0001144204-16-087704 | EDT | 2016-03-14T12:35:47Z | 2016-03-14T12:35:47Z | True |
