@@ -22,7 +22,8 @@ def index_headers_page(
         f"<SEC-HEADER>{accession}.hdr.sgml : 20240314\n<ACCEPTANCE-DATETIME>{acceptance}\n"
         f"<ACCESSION-NUMBER>{accession}\n<TYPE>8-K\n"
         + "".join(f"<ITEMS>{item}\n" for item in items)
-        + f"<FILING-DATE>{acceptance[:8] or '20181001'}\n<FILER>\n<COMPANY-DATA>\n<CONFORMED-NAME>Synthetic Co\n"
+        + f"<FILING-DATE>{acceptance[:8] or '20181001'}\n"
+        + "<FILER>\n<COMPANY-DATA>\n<CONFORMED-NAME>Synthetic Co\n"
         f"<CIK>{cik:010d}\n</COMPANY-DATA>\n<FORMER-COMPANY>\n<FORMER-CONFORMED-NAME>OLD CO\n"
         "</FORMER-COMPANY>\n</FILER>\n</SEC-HEADER>\n"
     )
