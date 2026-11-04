@@ -19,6 +19,7 @@ polled and collected, never resubmitted.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 from collections.abc import Callable, Sequence
@@ -253,6 +254,10 @@ class AnthropicProvider:
         log.warning("llm_retry", doc_id=request.doc_id, stop_reason=first.response.stop_reason)
         second = self._sync_once(request, attempts=2)
         second.costs = first.costs + second.costs
+        # A document's cost includes its first attempt.
+        second.response = dataclasses.replace(
+            second.response, usd=second.response.usd + first.response.usd
+        )
         second.response.extra["first_attempt"] = {
             "stop_reason": first.response.stop_reason,
             "raw_text": first.response.raw_text,
@@ -423,6 +428,7 @@ class AnthropicProvider:
             batch_turnaround_s=response.batch_turnaround_s,
             schema_valid=valid,
             attempts=response.attempts,
+            cost_usd=response.usd,
         )
 
     def score(self, requests: Sequence[ScoreRequest], mode: Mode) -> list[ScoreResult]:

@@ -145,7 +145,9 @@ def test_pipeline_end_to_end(workdir: Path) -> None:
     n_docs = int(first.strip().splitlines()[-1].split(" ")[0])
     assert f"{n_docs} cached" in again
     llm_dir = workdir / "data" / "processed" / "scores" / "scorer=llm"
-    llm_scores = pl.read_parquet(llm_dir / "model=fake-v1" / "masked=false" / "*.parquet")
+    llm_scores = pl.read_parquet(
+        llm_dir / "model=fake-v1" / "masked=false" / "sample=item202_main" / "*.parquet"
+    )
     assert llm_scores.height == n_docs and llm_scores["cost_usd"].is_not_null().all()
     calls = pl.read_parquet(workdir / "data" / "llm_cache" / "llm_calls" / "*.parquet")
     assert calls.filter(pl.col("run_id") == "llm-again")["mode"].unique().to_list() == ["cache_hit"]

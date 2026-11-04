@@ -339,6 +339,9 @@ def _llm_job(
     if spec.get("before"):
         cutoff = datetime.fromisoformat(str(spec["before"])).replace(tzinfo=UTC)
         docs = docs.filter(pl.col("event_ts_utc") < cutoff)
+    if spec.get("after"):
+        start = datetime.fromisoformat(str(spec["after"])).replace(tzinfo=UTC)
+        docs = docs.filter(pl.col("event_ts_utc") >= start)
     chosen = llm_run.draw_sample(
         docs, int(spec["n"]), spec.get("stratify", "year"), int(spec["seed"])
     )
@@ -518,7 +521,7 @@ def score_llm(
         scores_dir = job.cache_root / "scores"
         calls_dir = job.cache_root / "llm_calls"
     else:
-        model_dir = f"model={model}/masked={str(masked).lower()}"
+        model_dir = f"model={model}/masked={str(masked).lower()}/sample={sample}"
         scores_dir = pipeline.Paths.of(settings).scores("llm") / model_dir
         calls_dir = settings.llm_cache_path / "llm_calls"
     llm_run.write_tables(run, scores_dir, calls_dir, resolved)

@@ -79,6 +79,8 @@ class ScoreResult:
     batch_turnaround_s: float | None = None
     schema_valid: bool = False
     attempts: int = 1
+    cost_usd: float | None = None
+    """What producing this answer cost when it was first scored (``usd`` is this run's spend)."""
 
 
 @dataclass(frozen=True)

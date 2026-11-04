@@ -26,3 +26,5 @@ def test_rerun_is_served_from_the_cache(tmp_path: Path) -> None:
         assert {r.mode for r in second} == {"cache_hit"}
         assert all(r.usd == 0.0 for r in second)
         assert [r.payload for r in second] == [r.payload for r in first]
+        assert [r.cost_usd for r in second] == [r.usd for r in first]
+    assert sum(r.usd for r in first) == spent  # retries included in the document's cost

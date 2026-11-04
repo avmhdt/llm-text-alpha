@@ -39,9 +39,12 @@ scorers:
     samples:
       item202_dev: {doc_type: 8k_item202, n: 200, stratify: year, seed: 3, before: "2020-01-01"}
       item202_main: {doc_type: 8k_item202, n: 20000, stratify: year, seed: 7}
+      # every event in Haiku 5.5's post-cutoff window, preregistered in docs/preregistration.md
+      item202_post_h55: {doc_type: 8k_item202, n: 100000, stratify: year, seed: 7, after: "2026-07-01"}
       item202_contam: {doc_type: 8k_item202, n: 3000, stratify: [year, cutoff_window], seed: 11}
     runs:
       - {provider: anthropic, model: claude-haiku-5-5, sample: item202_main, masked: [false, true], mode: batch}
+      - {provider: anthropic, model: claude-haiku-5-5, sample: item202_post_h55, masked: [false, true], mode: batch}
       - {provider: anthropic, model: claude-haiku-4-5, sample: item202_contam, masked: [false, true], mode: batch}
       - {provider: local, model: llama-3.1-8b-instruct-q4_k_m, sample: item202_contam, masked: [false, true]}
 budget:

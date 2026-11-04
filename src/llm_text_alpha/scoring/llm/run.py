@@ -121,11 +121,10 @@ def tables(
     masked: bool,
     run_id: str,
 ) -> RunTables:
-    """``scores`` and ``llm_calls`` rows for ``results``.
+    """``scores`` (every valid answer, cached or not) and ``llm_calls`` (every request).
 
-    ``scores`` gets valid answers scored in this run; an answer served from the cache was
-    written when it was first scored, so a re-run adds no duplicate rows. ``llm_calls`` gets
-    every request, cache hits included.
+    A cached answer's ``cost_usd`` is what it cost when first scored; ``llm_calls.usd`` is
+    what this run spent, so zero for a cache hit.
     """
     now = datetime.now(UTC)
     score_rows: list[dict[str, Any]] = []
@@ -153,7 +152,7 @@ def tables(
                 "masked": masked,
             }
         )
-        if r.payload is None or r.from_cache:
+        if r.payload is None:
             continue
         aux = r.payload.model_dump(exclude={"score", "label"}) | {"stop_reason": r.stop_reason}
         score_rows.append(
@@ -167,7 +166,7 @@ def tables(
                 "label": r.payload.label,
                 "aux_json": json.dumps(aux, sort_keys=True),
                 "latency_ms": r.latency_ms,
-                "cost_usd": r.usd,
+                "cost_usd": r.usd if r.cost_usd is None else r.cost_usd,
                 "scored_at": now,
             }
         )
@@ -178,6 +177,6 @@ def tables(
 
 
 def write_tables(run: RunTables, scores_dir: Path, calls_dir: Path, run_id: str) -> None:
-    """One Parquet part per run under each table's folder."""
-    write_parquet_atomic(run.scores, scores_dir / f"part-{run_id}.parquet")
+    """The sample's scores (replaced by each run of it) and this run's calls (appended)."""
+    write_parquet_atomic(run.scores, scores_dir / "part-00000.parquet")
     write_parquet_atomic(run.calls, calls_dir / f"part-{run_id}.parquet")
