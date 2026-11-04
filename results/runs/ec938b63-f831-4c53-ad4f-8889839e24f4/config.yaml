@@ -1,0 +1,8 @@
+ar_model: ff5umd
+doc_type: 8k_item202
+horizon: 60
+regressors:
+- score_z
+scorer: llm
+se: twoway
+spec: score_only

@@ -107,3 +107,41 @@ def test_cost_latency_check(tmp_path: Path) -> None:
     outcome = verify.check_cost_latency(scores, calls)
     assert outcome.status == "fail" and "without latency" in outcome.detail
     assert verify.check_cost_latency(tmp_path / "none", calls).status == "fail"
+
+
+def _write(path: Path, frame: pl.DataFrame) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# provenance\n" + frame.write_csv(), "utf-8")
+
+
+def test_ablation_check(tmp_path: Path) -> None:
+    tables = tmp_path / "tables"
+    assert verify.check_ablation(tables, ["lm", "llm"]).status == "fail"
+    rows = {"combination": ["lm", "llm", "lm+llm"], "window": ["all"] * 3, "events": [10] * 3}
+    _write(tables / "ablation.csv", pl.DataFrame(rows))
+    assert verify.check_ablation(tables, ["lm", "llm"]).status == "pass"
+    _write(tables / "ablation.csv", pl.DataFrame(rows | {"events": [10, 10, 9]}))
+    assert "different" in verify.check_ablation(tables, ["lm", "llm"]).detail
+    _write(tables / "ablation.csv", pl.DataFrame({k: v[:2] for k, v in rows.items()}))
+    assert "missing" in verify.check_ablation(tables, ["lm", "llm"]).detail
+
+
+def test_headline_check(tmp_path: Path) -> None:
+    tables = tmp_path / "tables"
+    head = {"scorer": "llm", "window": "post", "hold_days": 5, "cost_mult": 1.0}
+    assert verify.check_headline(tables, head).status == "fail"
+    row = {
+        "scorer": ["llm"],
+        "window": ["post"],
+        "hold_days": [5],
+        "cost_mult": [1.0],
+        "alpha_annual_net": [0.2],
+        "t_alpha_net": [3.5],
+        "days": [60],
+    }
+    _write(tables / "portfolio_alpha.csv", pl.DataFrame(row))
+    assert verify.check_headline(tables, head).status == "pass"
+    _write(tables / "portfolio_alpha.csv", pl.DataFrame(row | {"t_alpha_net": [1.0]}))
+    outcome = verify.check_headline(tables, head)
+    assert outcome.status == "fail" and "not met" in outcome.detail
+    assert verify.check_headline(tables, head | {"window": "x"}).detail.startswith("no row")

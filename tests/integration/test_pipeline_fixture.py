@@ -154,11 +154,23 @@ def test_pipeline_end_to_end(workdir: Path) -> None:
     metrics = json.loads((workdir / "results" / "runs" / "llm-first" / "metrics.json").read_text())
     assert metrics["status"] == "done" and metrics["estimate"]["worst_case_usd"] == 0.0
     assert "open holds included" in invoke("llm", "spend")
-    out = invoke("signals", "build", "--scorers", "lm,finbert")
-    assert "finbert" in out and "lm" in out
+    config = workdir / "configs" / "default.yaml"
+    text = config.read_text("utf-8")
+    text = text.replace(
+        "llm: {model: claude-haiku-5-5, samples: [item202_main, item202_post_h55]}",
+        "llm: {model: fake-v1, samples: [item202_main]}",
+    ).replace("min_events: 50}", "min_events: 5}")
+    config.write_text(text, "utf-8")
+    out = invoke("signals", "build", "--scorers", "lm,finbert,sue,llm")
+    assert "finbert" in out and "lm" in out and "llm" in out
     assert "kept" in invoke("eval", "abnormal")
     invoke("eval", "event-study", "--scorers", "lm,finbert")
     invoke("eval", "regress", "--scorers", "lm", "--horizons", "1,5")
+    trial_rows_before_m5 = 2 + 2 * 6 * 2
+    invoke("eval", "regress", "--scorers", "lm", "--horizons", "1,5")  # same specs: not new trials
+    assert "portfolios written" in invoke("eval", "portfolio", "--scorers", "lm,llm,sue")
+    assert "rows written" in invoke("eval", "ablation")
+    assert "trials logged" in invoke("eval", "trials")
     signals = pl.read_parquet(workdir / "data" / "processed" / "signals" / "signals.parquet")
     assert (signals["entry_ts_utc"] > signals["event_ts_utc"]).all()
     assert signals.filter(pl.col("quintile") > 0).height > 0
@@ -168,7 +180,17 @@ def test_pipeline_end_to_end(workdir: Path) -> None:
     assert (tables / "regressions.csv").read_text("utf-8").startswith("# command=lta eval regress")
     with (workdir / "results" / "trial_log.csv").open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
-    families = {row["strategy_family"] for row in rows}
-    assert families == {"event_study", "cs_regression", "fm_regression"}
-    assert all(row["x_run_kind"] == "analysis" and row["n_obs"] == "0" for row in rows)
-    assert len(rows) == 2 + 2 * 5 * 2
+    analysis = rows[:trial_rows_before_m5]
+    assert {row["strategy_family"] for row in analysis} == {
+        "event_study",
+        "cs_regression",
+        "fm_regression",
+    }
+    assert all(row["x_run_kind"] == "analysis" and row["n_obs"] == "0" for row in analysis)
+    later = {row["strategy_family"] for row in rows[trial_rows_before_m5:]}
+    assert later <= {"portfolio", "ablation"}
+    for row in rows:
+        if row["strategy_family"] == "portfolio":
+            assert int(row["n_obs"]) > 0
+            assert (workdir / "results" / row["returns_path"]).exists()
+    assert (tables / "trials.md").exists()

@@ -1,0 +1,5 @@
+combination: llm
+doc_type: 8k_item202
+event_set: intersection:lm,finbert,llm
+hold_days: 5
+window: post_h55

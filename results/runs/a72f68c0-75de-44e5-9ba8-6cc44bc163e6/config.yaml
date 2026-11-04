@@ -1,0 +1,10 @@
+ar_model: ff5umd
+doc_type: 8k_item202
+horizon: 1
+regressors:
+- score_orth
+- size_log
+- mom_12_2
+scorer: llm
+se: fm
+spec: sue_orth

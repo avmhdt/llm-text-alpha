@@ -5,10 +5,11 @@ Every stage can run alone (section 5). Paths follow section 7b, relative to ``DA
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import structlog
@@ -83,6 +84,27 @@ def load_scores(paths: Paths, scorer: str) -> pl.DataFrame:
     if not any(folder.glob("*.parquet")):
         raise FileNotFoundError(f"no {scorer} scores under {folder}")
     return pl.read_parquet(folder / "*.parquet")
+
+
+def load_llm_scores(
+    paths: Paths, alias: str, model: str, samples: Sequence[str], masked: bool = False
+) -> pl.DataFrame:
+    """One LLM's scores across ``samples`` (one row per document), labelled ``alias``.
+
+    A document in several samples has the same cached answer in each, so the first is kept.
+    """
+    root = paths.scores("llm") / f"model={model}" / f"masked={str(masked).lower()}"
+    frames = []
+    for sample in samples:
+        folder = root / f"sample={sample}"
+        if not any(folder.glob("*.parquet")):
+            raise FileNotFoundError(f"no {model} scores for sample {sample} under {folder}")
+        frames.append(pl.read_parquet(folder / "*.parquet"))
+    return (
+        pl.concat(frames)
+        .unique("doc_id", keep="first", maintain_order=True)
+        .with_columns(pl.lit(alias).alias("scorer"))
+    )
 
 
 def build_panels(
@@ -182,7 +204,12 @@ def sue_scores(earnings: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def build_signals(paths: Paths, scorers: list[str], buffer_minutes: int) -> pl.DataFrame:
+def build_signals(
+    paths: Paths,
+    scorers: list[str],
+    buffer_minutes: int,
+    llm_scorers: Mapping[str, Mapping[str, Any]] | None = None,
+) -> pl.DataFrame:
     """Gate every scorer's scores, add trailing ``score_z`` and quintiles, write ``signals``.
 
     The announced quarter's SUE joins as ``sue_announced`` (DQ-08's labelled exception:
@@ -201,7 +228,17 @@ def build_signals(paths: Paths, scorers: list[str], buffer_minutes: int) -> pl.D
         )
     )
     earnings = pl.read_parquet(paths.panels / "earnings.parquet")
-    frames = [sue_scores(earnings) if s == "sue" else load_scores(paths, s) for s in scorers]
+    llm = dict(llm_scorers or {})
+
+    def frame_of(scorer: str) -> pl.DataFrame:
+        if scorer == "sue":
+            return sue_scores(earnings)
+        if scorer in llm:
+            spec = llm[scorer]
+            return load_llm_scores(paths, scorer, spec["model"], spec["samples"])
+        return load_scores(paths, scorer)
+
+    frames = [frame_of(s) for s in scorers]
     scores = pl.concat(
         [f.select("doc_id", "scorer", "model_id", "masked", "score") for f in frames]
     )
@@ -259,7 +296,9 @@ REGRESSION_SPECS: dict[str, list[str]] = {
     "controls": ["score_z", "size_log", "mom_12_2", "sue"],
     "controls_bm": ["score_z", "size_log", "mom_12_2", "sue", "bm"],
     "controls_sue_announced": ["score_z", "size_log", "mom_12_2", "sue_announced"],
+    "sue_orth": ["score_orth", "size_log", "mom_12_2"],
 }
+"""``sue_orth`` reports the SUE-orthogonalized score's coefficient in the ``score_z`` columns."""
 
 
 @dataclass(frozen=True)
@@ -357,6 +396,18 @@ def run_event_study(
     return result.summary
 
 
+def sue_orthogonal(panel: pl.DataFrame) -> pl.DataFrame:
+    """``score_orth``: the residual of ``score_z`` on ``sue`` within each entry month (AC-H-05)."""
+    month = pl.col("entry_date").dt.truncate("1mo")
+    valid = pl.col("score_z").is_not_null() & pl.col("sue").is_not_null()
+    z = pl.when(valid).then(pl.col("score_z"))
+    s = pl.when(valid).then(pl.col("sue"))
+    dz = z - z.mean().over(month)
+    ds = s - s.mean().over(month)
+    beta = (dz * ds).sum().over(month) / (ds**2).sum().over(month)
+    return panel.with_columns((dz - beta * ds).alias("score_orth"))
+
+
 def regression_panel(paths: Paths, scorer: str, model: str, horizons: list[int]) -> pl.DataFrame:
     """Signals of one scorer joined to their CAR[0,k] (the panel FR-17 regresses)."""
     from llm_text_alpha.evaluation.abnormal import cumulative
@@ -381,21 +432,35 @@ def run_regressions(
     horizons: list[int],
     report: Report,
     methods: list[str],
+    window: tuple[str, date | None] = ("all", None),
+    table_name: str = "regressions",
 ) -> pl.DataFrame:
-    """CAR[0,k] on score_z with controls, two-way clustered and Fama-MacBeth (FR-17)."""
+    """CAR[0,k] on score_z with controls, two-way clustered and Fama-MacBeth (FR-17).
+
+    ``window`` keeps events published on or after its date. A specification already in the
+    trial log with the same parameters is not logged again: rerunning it on the same data is
+    not a new trial.
+    """
     from llm_text_alpha.evaluation.regressions import cross_sectional_regression
     from llm_text_alpha.reporting.tables import write_table
     from llm_text_alpha.tracking import trial_log
 
     rows: list[dict[str, object]] = []
+    seen = {
+        family: trial_log.logged_params(report.trial_log, family)
+        for family in ("cs_regression", "fm_regression")
+    }
     for scorer in scorers:
-        panel = regression_panel(paths, scorer, model, horizons)
+        panel = sue_orthogonal(regression_panel(paths, scorer, model, horizons))
+        if window[1] is not None:
+            panel = panel.filter(pl.col("event_ts_utc").dt.date() >= window[1])
         for k in horizons:
             for spec, regressors in REGRESSION_SPECS.items():
                 for method in methods:
                     fit = cross_sectional_regression(panel, f"car_{k}", regressors, method)  # type: ignore[arg-type]
-                    coef = fit.to_frame().filter(pl.col("term") == "score_z").row(0, named=True)
-                    params = {
+                    term = regressors[0]
+                    coef = fit.to_frame().filter(pl.col("term") == term).row(0, named=True)
+                    params: dict[str, object] = {
                         "scorer": scorer,
                         "horizon": k,
                         "spec": spec,
@@ -404,6 +469,27 @@ def run_regressions(
                         "regressors": regressors,
                         "doc_type": DOC_TYPE,
                     }
+                    if window[1] is not None:
+                        params["window"] = window[0]
+                        params["window_start"] = str(window[1])
+                    family = "cs_regression" if method == "twoway" else "fm_regression"
+                    rows.append(
+                        {
+                            "scorer": scorer,
+                            "window": window[0],
+                            "horizon": f"CAR[0,{k}]",
+                            "spec": spec,
+                            "se": method,
+                            "coef_score_z": coef["coef"],
+                            "se_score_z": coef["se"],
+                            "t_score_z": coef["t"],
+                            "nobs": fit.nobs,
+                            "periods": fit.n_periods,
+                            "r2": fit.r2,
+                        }
+                    )
+                    if trial_log.canonical_json(params) in seen[family]:
+                        continue
                     run_id = trial_log.new_run_id()
                     trial_log.record_run(
                         run_id,
@@ -416,7 +502,6 @@ def run_regressions(
                         },
                         report.trial_log,
                     )
-                    family = "cs_regression" if method == "twoway" else "fm_regression"
                     trial_log.log_trial(
                         run_id,
                         family,
@@ -429,23 +514,38 @@ def run_regressions(
                         report.trial_log,
                         run_kind="analysis",
                     )
-                    rows.append(
-                        {
-                            "scorer": scorer,
-                            "horizon": f"CAR[0,{k}]",
-                            "spec": spec,
-                            "se": method,
-                            "coef_score_z": coef["coef"],
-                            "se_score_z": coef["se"],
-                            "t_score_z": coef["t"],
-                            "nobs": fit.nobs,
-                            "periods": fit.n_periods,
-                            "r2": fit.r2,
-                        }
-                    )
     table = pl.DataFrame(rows)
-    write_table(table, report.tables, "regressions", report.command, report.run_id, report.label)
+    write_table(table, report.tables, table_name, report.command, report.run_id, report.label)
     return table
+
+
+def sue_correlation(
+    paths: Paths, scorers: list[str], window: tuple[str, date | None]
+) -> pl.DataFrame:
+    """Spearman correlation of each scorer's ``score_z`` with SUE and announced SUE (AC-H-05)."""
+    signals = pl.read_parquet(paths.signals)
+    rows: list[dict[str, object]] = []
+    for scorer in scorers:
+        part = _one_scorer(signals, scorer).filter(pl.col("score_z").is_not_null())
+        if window[1] is not None:
+            part = part.filter(pl.col("event_ts_utc").dt.date() >= window[1])
+        for control in ("sue", "sue_announced"):
+            pair = part.select("score_z", control).drop_nulls()
+            rho = (
+                pair.select(pl.corr("score_z", control, method="spearman")).item()
+                if pair.height > 2
+                else None
+            )
+            rows.append(
+                {
+                    "scorer": scorer,
+                    "window": window[0],
+                    "with": control,
+                    "n": pair.height,
+                    "spearman": rho,
+                }
+            )
+    return pl.DataFrame(rows)
 
 
 def run_pead_check(paths: Paths, model: str, report: Report) -> pl.DataFrame:

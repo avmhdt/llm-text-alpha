@@ -1,0 +1,13 @@
+ar_model: ff5umd
+doc_type: 8k_item202
+horizon: 5
+regressors:
+- score_z
+- size_log
+- mom_12_2
+- sue_announced
+scorer: llm
+se: fm
+spec: controls_sue_announced
+window: post_h55
+window_start: '2026-07-01'

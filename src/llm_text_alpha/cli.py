@@ -627,14 +627,17 @@ def data_lm_dict(
 
 @signals_app.command("build")
 def signals_build(
-    scorers: Annotated[str, typer.Option(help="Comma-separated scorers.")] = "lm,finbert,sue",
+    scorers: Annotated[str, typer.Option(help="Comma-separated scorers.")] = "lm,finbert,sue,llm",
     buffer_min: Annotated[int, typer.Option(help="Minutes between publication and entry.")] = 5,
     config: ConfigOpt = DEFAULT_CONFIG,
     run_id: RunIdOpt = None,
 ) -> None:
     """Run the timestamp gate and trailing standardization; fails on any violation (FR-07)."""
     settings, _ = _start("signals build", run_id)
-    signals = pipeline.build_signals(pipeline.Paths.of(settings), scorers.split(","), buffer_min)
+    llm = load_yaml(config).get("signals", {}).get("llm_scorers", {})
+    signals = pipeline.build_signals(
+        pipeline.Paths.of(settings), scorers.split(","), buffer_min, llm
+    )
     counts = signals.group_by("scorer").len().sort("scorer")
     typer.echo(", ".join(f"{s} {n}" for s, n in counts.iter_rows()) + " signals")
 
@@ -717,22 +720,185 @@ def eval_regress(
     horizons: Annotated[str, typer.Option(help="k in CAR[0,k].")] = "1,5,20,60",
     se: Annotated[str, typer.Option(help="twoway, fm, or both.")] = "both",
     model: Annotated[str, typer.Option(help="Abnormal-return model.")] = "ff5umd",
+    window: Annotated[str, typer.Option(help="Event window from the config.")] = "all",
     config: ConfigOpt = DEFAULT_CONFIG,
     run_id: RunIdOpt = None,
 ) -> None:
     """CAR[0,k] on score_z with size, momentum and SUE controls (FR-17)."""
     settings, resolved = _start("eval regress", run_id)
-    report = _report(f"lta eval regress --scorers {scorers} --se {se}", resolved, config)
+    command = f"lta eval regress --scorers {scorers} --se {se} --window {window}"
+    report = _report(command, resolved, config)
     methods = ["twoway", "fm"] if se == "both" else [se]
+    chosen = (window, _windows(config)[window][0])
+    suffix = "" if window == "all" else f"_{window}"
+    paths = pipeline.Paths.of(settings)
     table = pipeline.run_regressions(
-        pipeline.Paths.of(settings),
+        paths,
         scorers.split(","),
         model,
         [int(k) for k in horizons.split(",")],
         report,
         methods,
+        chosen,
+        f"regressions{suffix}",
     )
-    typer.echo(f"{table.height} regressions written to {report.tables / 'regressions.md'}")
+    write_table(
+        pipeline.sue_correlation(paths, scorers.split(","), chosen),
+        report.tables,
+        f"sue_correlation{suffix}",
+        command,
+        resolved,
+    )
+    typer.echo(f"{table.height} regressions written to {report.tables / f'regressions{suffix}.md'}")
+
+
+def _windows(config: Path) -> dict[str, tuple[date | None, date | None]]:
+    raw = load_yaml(config)["evaluation"]["portfolio"]["windows"]
+    return {
+        name: tuple(date.fromisoformat(str(v)) if v else None for v in bounds)  # type: ignore[misc]
+        for name, bounds in raw.items()
+    }
+
+
+def _context(settings: Settings, config: Path) -> Any:
+    from llm_text_alpha import evaluate
+
+    ev = load_yaml(config)["evaluation"]
+    return evaluate.context(
+        pipeline.Paths.of(settings),
+        {str(k): float(v) for k, v in ev["costs"]["bps_by_size_rank"].items()},
+        int(ev["newey_west_lags"]["portfolio"]),
+        str(ev["ar_model"]),
+    )
+
+
+@eval_app.command("portfolio")
+def eval_portfolio(
+    scorers: Annotated[str, typer.Option(help="Comma-separated scorers.")] = "llm,finbert,lm,sue",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Calendar-time long-short net of costs; alpha on FF5 + UMD + PEAD, Newey-West t (FR-18)."""
+    from llm_text_alpha import evaluate
+
+    settings, resolved = _start("eval portfolio", run_id)
+    ev = load_yaml(config)["evaluation"]
+    report = _report(f"lta eval portfolio --scorers {scorers}", resolved, config)
+    table = evaluate.run_portfolios(
+        _context(settings, config),
+        scorers.split(","),
+        _windows(config),
+        [int(h) for h in ev["portfolio"]["hold_days"]],
+        [float(m) for m in ev["costs"]["sensitivity_mult"]],
+        report,
+    )
+    head = ev["portfolio"]["headline"]
+    if table.is_empty():
+        typer.echo("no portfolio had 20 or more active days")
+        return
+    row = table.filter(
+        (pl.col("scorer") == head["scorer"])
+        & (pl.col("window") == head["window"])
+        & (pl.col("hold_days") == int(head["hold_days"]))
+        & (pl.col("cost_mult") == float(head["cost_mult"]))
+    )
+    typer.echo(f"{table.height} portfolios written to {report.tables / 'portfolio_alpha.md'}")
+    if row.height:
+        r = row.row(0, named=True)
+        verdict = "met" if r["t_alpha_net"] > 3 else "not met"
+        typer.echo(
+            f"headline {head}: alpha {r['alpha_annual_net']:.2%}/yr, t {r['t_alpha_net']:.2f} "
+            f"over {r['days']} days ({verdict})"
+        )
+
+
+@eval_app.command("ablation")
+def eval_ablation(
+    event_set: Annotated[str, typer.Option(help="Only 'intersection'.")] = "intersection",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Dictionary vs FinBERT vs LLM and their combinations on identical events (FR-19)."""
+    from llm_text_alpha import evaluate
+
+    if event_set != "intersection":
+        typer.echo("error: --event-set is intersection", err=True)
+        raise typer.Exit(2)
+    settings, resolved = _start("eval ablation", run_id)
+    cfg = load_yaml(config)
+    ab = cfg["evaluation"]["ablation"]
+    scorers = [str(s) for s in ab["scorers"]]
+    llm_chars = int(
+        int(cfg["scorers"]["llm"]["max_input_tokens"])
+        * float(cfg["scorers"]["llm"]["chars_per_token"])
+    )
+    fin = cfg["scorers"]["finbert"]
+    reads = {
+        "lm": "all EX-99 text",
+        "finbert": f"first {fin.get('max_chunks')} chunks of {fin['max_tokens']} tokens",
+        "llm": f"first {llm_chars:,} characters "
+        f"(about {cfg['scorers']['llm']['max_input_tokens']} tokens)",
+    }
+    paths = pipeline.Paths.of(settings)
+    report = _report("lta eval ablation --event-set intersection", resolved, config)
+    table = evaluate.run_ablation(
+        _context(settings, config),
+        scorers,
+        _windows(config),
+        int(ab["hold_days"]),
+        report,
+        reads,
+        evaluate.cost_per_document(paths, [s for s in scorers if s != "llm"])
+        | {"llm": _llm_unit_cost(paths, cfg)},
+        int(ab.get("min_events", 50)),
+    )
+    typer.echo(f"{table.height} rows written to {report.tables / 'ablation.md'}")
+
+
+def _llm_unit_cost(paths: pipeline.Paths, cfg: dict[str, Any]) -> float:
+    spec = cfg["signals"]["llm_scorers"]["llm"]
+    scores = pipeline.load_llm_scores(paths, "llm", spec["model"], spec["samples"])
+    return float(scores["cost_usd"].fill_null(0.0).to_numpy().mean())
+
+
+@eval_app.command("capacity")
+def eval_capacity(config: ConfigOpt = DEFAULT_CONFIG, run_id: RunIdOpt = None) -> None:
+    """Net alpha against AUM under participation and square-root impact (FR-21)."""
+    from llm_text_alpha import evaluate
+
+    settings, resolved = _start("eval capacity", run_id)
+    c = load_yaml(config)["evaluation"]["capacity"]
+    report = _report("lta eval capacity", resolved, config)
+    window = str(c["window"])
+    _, points = evaluate.run_capacity(
+        _context(settings, config),
+        str(c["scorer"]),
+        (window, _windows(config)[window]),
+        int(c["hold_days"]),
+        [float(a) for a in c["aum_usd"]],
+        float(c["participation"]),
+        int(c["adv_days"]),
+        float(c["impact_coef"]),
+        report,
+    )
+    typer.echo(f"capacity: {points}")
+
+
+@eval_app.command("trials")
+def eval_trials(config: ConfigOpt = DEFAULT_CONFIG, run_id: RunIdOpt = None) -> None:
+    """Trial count by family and the Deflated Sharpe Ratio of the headline strategy (FR-30)."""
+    from llm_text_alpha import evaluate
+
+    _, resolved = _start("eval trials", run_id)
+    head = load_yaml(config)["evaluation"]["portfolio"]["headline"]
+    report = _report("lta eval trials", resolved, config)
+    counts, deflated = evaluate.run_trials(report, head)
+    typer.echo(f"{int(counts['trials'].sum())} trials logged")
+    if deflated is not None:
+        typer.echo(
+            f"headline DSR {deflated.dsr:.3f} (daily Sharpe {deflated.sr:.4f} vs "
+            f"threshold {deflated.sr0:.4f}, {deflated.n_trials} portfolio trials)"
+        )
 
 
 @app.command("verify")
@@ -742,7 +908,7 @@ def verify(
     run_id: RunIdOpt = None,
 ) -> None:
     """Run the check behind an acceptance criterion (section 12)."""
-    load_yaml(config)
+    cfg = load_yaml(config)
     repo = Path.cwd()
 
     def ac_w_04() -> verify_mod.Outcome:
@@ -776,9 +942,15 @@ def verify(
             ],
         ),
         "ac-w-10": ac_w_10,
+        "ac-w-03": lambda: verify_mod.check_ablation(
+            repo / "reports" / "tables", [str(s) for s in cfg["evaluation"]["ablation"]["scorers"]]
+        ),
+        "ac-h-01": lambda: verify_mod.check_headline(
+            repo / "reports" / "tables", dict(cfg["evaluation"]["portfolio"]["headline"])
+        ),
         "ac-w-01": lambda: verify_mod.check_gate_properties(repo),
         "ac-w-02": lambda: verify_mod.check_figures(
-            repo / "reports" / "figures", ["lm", "finbert"]
+            repo / "reports" / "figures", ["lm", "finbert", "llm"]
         ),
         "ac-w-07": lambda: verify_mod.run_pytest(
             "ac-w-07",
@@ -818,12 +990,8 @@ _LATER: dict[str, list[tuple[str, str, str]]] = {
         ("audit-mask", "M6", "Report residual masking hits"),
     ],
     "eval": [
-        ("portfolio", "M5", "Calendar-time long-short portfolio"),
-        ("ablation", "M5", "Ablation on the intersection event set"),
         ("contamination", "M6", "Contamination protocol"),
-        ("capacity", "M5", "Capacity analysis"),
         ("latency", "M6", "Latency budget"),
-        ("trials", "M5", "Trial count and Deflated Sharpe Ratio"),
     ],
     "report": [("build", "M7", "Figures and tables")],
 }

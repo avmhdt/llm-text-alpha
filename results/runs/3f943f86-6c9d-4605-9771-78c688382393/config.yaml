@@ -1,0 +1,21 @@
+alpha_factors:
+- mktrf
+- smb
+- hml
+- rmw
+- cma
+- umd
+cost_mult: 1.0
+costs_bps:
+  1-200: 5.0
+  201-500: 10.0
+  501-1000: 20.0
+doc_type: 8k_item202
+hold_days: 20
+masked: false
+model_id: srw
+nw_lags: 10
+scorer: sue
+weighting: equal
+window: post_h55
+window_start: '2026-07-01'

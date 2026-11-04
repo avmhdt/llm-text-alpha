@@ -1,0 +1,10 @@
+ar_model: ff5umd
+doc_type: 8k_item202
+horizon: 1
+regressors:
+- score_z
+scorer: finbert
+se: fm
+spec: score_only
+window: post_h55
+window_start: '2026-07-01'
