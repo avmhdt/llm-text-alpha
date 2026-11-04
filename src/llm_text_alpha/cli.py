@@ -443,7 +443,9 @@ def eval_event_study(
         )
         row = summary.filter((pl.col("group") == "Q5-Q1") & (pl.col("horizon") == "CAR[0,5]"))
         if row.height:
-            typer.echo(f"{scorer}: Q5-Q1 CAR[0,5] {row['car'][0]:.4%} (t {row['t'][0]:.2f})")
+            t = row["t"][0]
+            t_text = "n/a" if t is None else f"{t:.2f}"
+            typer.echo(f"{scorer}: Q5-Q1 CAR[0,5] {row['car'][0]:.4%} (t {t_text})")
 
 
 @eval_app.command("regress")
