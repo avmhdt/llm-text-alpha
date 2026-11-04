@@ -16,10 +16,10 @@
 
 - [x] A text corpus with exact publication timestamps (SEC acceptance time, call time, news publish time). SEC acceptance times for 71,313 Item 2.02 8-Ks; transcripts are out of scope (D-07) and news arrives in M5. (FR-01, FR-02, FR-06)
 - [x] Trades at the next available bar after each timestamp; returns labelled as abnormal returns against a factor model. (FR-07, FR-15, AC-W-01, AC-W-07)
-- [ ] Baselines first: the Loughran–McDonald dictionary and FinBERT. Then LLM scores or embeddings.
+- [x] Baselines first: the Loughran–McDonald dictionary and FinBERT. Then LLM scores or embeddings. LM and FinBERT on 44,464 Item 2.02 releases (M3), then Claude Haiku 5.5 on 21,030 (M4). (FR-08, FR-09, FR-10)
 - [x] An event study of cumulative abnormal returns around each event, plus cross-sectional regressions controlling for size, momentum and earnings surprise (SUE). (FR-16, FR-17, AC-W-02, AC-W-08)
 - [ ] Contamination controls: test only after each model’s training cutoff, and rerun on text with company names and dates masked.
-- [ ] Inference cost and latency tracked per document.
+- [x] Inference cost and latency tracked per document. Every score has `cost_usd`; synchronous, local, FinBERT and dictionary scores have `latency_ms`; batch calls have their turnaround. (FR-13, AC-W-10)
 
 ## Data
 
