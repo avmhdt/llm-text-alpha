@@ -20,6 +20,7 @@ from llm_text_alpha import cli
 from llm_text_alpha.corpus.calendar import xnys
 from llm_text_alpha.data import prices
 from llm_text_alpha.data.factors import FACTOR_COLUMNS
+from llm_text_alpha.tracking.trial_log import ensure_log
 from tests.unit.test_corpus_build import write_filing
 from tests.unit.test_scorers import MINI, VOCAB
 
@@ -33,10 +34,7 @@ def workdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, efp_root: Path) -> 
     from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast
 
     shutil.copytree(REPO / "configs", tmp_path / "configs")
-    (tmp_path / "results").mkdir()
-    (tmp_path / "results" / "trial_log.csv").write_text(
-        (REPO / "results" / "trial_log.csv").read_text("utf-8"), "utf-8"
-    )
+    ensure_log(tmp_path / "results" / "trial_log.csv")
     data = tmp_path / "data"
     config = (tmp_path / "configs" / "default.yaml").read_text("utf-8")
     config = (
