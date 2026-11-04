@@ -212,7 +212,7 @@ def corpus_build(
     if settings.efp_root is None or not index_path.exists():
         typer.echo("error: needs EFP_DATA_DIR and `lta data edgar-index` output", err=True)
         raise typer.Exit(1)
-    index = pl.read_parquet(index_path)
+    index = pl.read_parquet(index_path).unique(["accession", "cik"], keep="first")
     headers = corpus.header_table(raw)
     index = index.drop([c for c in headers.columns if c != "accession" and c in index.columns])
     write_parquet_atomic(index.join(headers, on="accession", how="left"), index_path)

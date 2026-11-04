@@ -154,3 +154,24 @@ def test_empty_header_acceptance_uses_the_submissions_time(tmp_path: Path) -> No
         ),
     )
     assert checked["by_year"].is_empty()
+
+
+def test_co_registrant_filing_is_kept_once_and_linked_to_the_universe_filer(
+    tmp_path: Path, efp_root: Path
+) -> None:
+    raw = tmp_path / "raw"
+    good = {"e.htm": ("EX-99.1", f"<p>{LONG}</p>")}
+    for cik in (4242, 1000010):
+        write_filing(raw, cik, "0000000001-16-000001", "2016-03-01T21:00:00+00:00", good)
+    for folder in raw.glob("*/*"):
+        manifest = json.loads((folder / DONE).read_text("utf-8"))
+        manifest["ciks"] = [4242, 1000010]
+        (folder / DONE).write_text(json.dumps(manifest), "utf-8")
+    chosen = build.unique_filings(raw)
+    assert len(chosen) == 1 and chosen[0][1]["cik"] == 4242
+    docs = build.build_item202(raw, date(2016, 1, 1), date(2016, 12, 31)).documents
+    assert docs.height == 1 and docs["ciks"].to_list() == [[4242, 1000010]]
+    linked = build.link_documents(docs, efp_root / "processed" / "pit", top_n=5)
+    row = linked.row(0, named=True)
+    assert row["cik"] == 1000010 and row["security_id"] == "SYN:10" and row["in_universe"]
+    assert build.header_table(raw).height == 1
