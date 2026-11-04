@@ -3,9 +3,12 @@
 ``rel_day`` counts sessions from the entry date (0). The entry-day return is open to close,
 since the trade enters at the open; every other day is close to close. Expected returns:
 
-- ``ff5umd``: ``rf + alpha + beta' f`` with FF5 and momentum, fitted by OLS on excess returns
-  over sessions -250 to -30. Fewer than 120 valid returns falls back to ``market`` and is
-  flagged.
+- ``ff5umd``: ``rf + beta' f`` with FF5 and momentum, the betas fitted by OLS (with an
+  intercept) on excess returns over sessions -250 to -30. The fitted intercept is left out
+  of the expected return: a firm's alpha over the year before an event is mostly past
+  performance, and carrying it forward 60 sessions biases every CAR against recent
+  winners. The residual deviation (``sigma``) still comes from the full fit. Fewer than 120
+  valid returns falls back to ``market`` and is flagged.
 - ``market``: ``rf + mktrf``.
 - ``raw``: zero, so ``ar`` is the return.
 
@@ -175,7 +178,7 @@ def abnormal_returns(
             expected = f_window[:, -1] + f_window[:, 0]
             expected_est = f_est[:, -1] + f_est[:, 0]
         else:
-            expected = f_window[:, -1] + beta[0] + f_window[:, :-1] @ beta[1:]
+            expected = f_window[:, -1] + f_window[:, :-1] @ beta[1:]
             expected_est = f_est[:, -1] + beta[0] + f_est[:, :-1] @ beta[1:]
         resid_all = ret[est] - expected_est
         finite = np.isfinite(resid_all)

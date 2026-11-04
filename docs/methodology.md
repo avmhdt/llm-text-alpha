@@ -92,7 +92,7 @@ A quarter's announcement is the company's last Item 2.02 8-K after the quarter e
 
 ### Abnormal returns (FR-15, DQ-09)
 
-For each event, OLS of excess returns on FF5 and momentum over sessions -250 to -30 gives `exp_ret = rf + alpha + beta' f`. Fewer than 120 valid returns falls back to the market model (`rf + mktrf`), and the event is flagged. `rel_day` 0 is the entry session.
+For each event, OLS of excess returns on a constant, FF5 and momentum over sessions -250 to -30 gives the betas, and `exp_ret = rf + beta' f`. The fitted intercept is not carried into the event window: a year of alpha before an event is mostly past performance, and adding it to 60 sessions of expected return pushes every CAR down for recent winners. Fewer than 120 valid returns falls back to the market model (`rf + mktrf`), and the event is flagged. `rel_day` 0 is the entry session.
 
 ### Event study (FR-16)
 

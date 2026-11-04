@@ -130,3 +130,18 @@ def test_cumulative() -> None:
     car = cumulative(ar, [1, 2])
     assert car.row(0, named=True) == {"doc_id": "a", "permno": 1, "car_1": 1.0, "car_2": 3.0}
     assert FACTORS[0] == "mktrf"
+
+
+def test_estimation_alpha_is_not_carried_into_the_window() -> None:
+    """A firm with a pure alpha and no factor exposure: its AR is the alpha, not zero."""
+    market = make_market(5, n_firms=1, n_days=400, idio=0.0)
+    prices = market.prices.with_columns(
+        pl.lit(0.001).alias("ret"), pl.lit(0.001).alias("ret_open_close")
+    )
+    factors = market.factors.with_columns(pl.lit(0.0).alias("rf"))
+    events = pl.DataFrame(
+        {"doc_id": ["a"], "permno": [0], "entry_date": [market.sessions[300]]}
+    ).with_columns(pl.col("permno").cast(pl.Int64))
+    result = abnormal_returns(events, prices, factors, "ff5umd", (-250, -30), (-10, 60), CAL)
+    assert result.events["model_used"].to_list() == ["ff5umd"]
+    assert result.ar["ar"].to_numpy() == pytest.approx(np.full(71, 0.001), abs=1e-9)
