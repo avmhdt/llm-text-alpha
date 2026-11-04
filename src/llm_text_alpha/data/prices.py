@@ -93,6 +93,38 @@ class EfpPrices:
             "last_date": payload.get("last_date"),
         }
 
+    def universe_ciks(self, start: date, end: date, top_n: int) -> pl.DataFrame:
+        """CIKs of companies in eqpit's top ``top_n`` at any month end in ``[start, end]``.
+
+        Returns ``cik``, ``first_month`` and ``last_month``. Companies keyed by a Sharadar
+        id rather than a CIK cannot be matched to EDGAR and are left out.
+        """
+        from eqpit.store import PitStore
+
+        store = PitStore.open(self.pit_root)
+        frames = [
+            store.universe(month_end, top_n)
+            .select("company_id")
+            .with_columns(pl.lit(month_end).alias("month"))
+            for month_end in store.month_ends(start, end)
+        ]
+        if not frames:
+            return pl.DataFrame(
+                schema={"cik": pl.Int64, "first_month": pl.Date, "last_month": pl.Date}
+            )
+        members = pl.concat(frames).filter(pl.col("company_id").str.starts_with("CIK:"))
+        return (
+            members.with_columns(
+                pl.col("company_id").str.strip_prefix("CIK:").cast(pl.Int64).alias("cik")
+            )
+            .group_by("cik")
+            .agg(
+                pl.col("month").min().alias("first_month"),
+                pl.col("month").max().alias("last_month"),
+            )
+            .sort("cik")
+        )
+
     def daily_prices(self, start: date, end: date, max_securities: int) -> pl.DataFrame:
         from eqpit import calendar
         from eqpit.store import PitStore

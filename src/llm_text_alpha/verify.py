@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,7 +29,6 @@ class Outcome:
 
 
 PENDING = {
-    "ac-w-01": "M2",
     "ac-w-02": "M3",
     "ac-w-03": "M5",
     "ac-w-05": "M4",
@@ -117,6 +117,31 @@ def check_trial_log(log_path: Path) -> Outcome:
     if tuple(header[:10]) != trial_log.REQUIRED_COLUMNS:
         return Outcome("ac-w-11", "fail", f"writer header {header}")
     return Outcome("ac-w-11", "pass", f"header ok; {rows} rows in {log_path.as_posix()}")
+
+
+def check_gate_properties(repo: Path) -> Outcome:
+    """AC-W-01, property part: the hypothesis suite in ``tests/property/test_gate.py``.
+
+    The full-data part (every real signal) joins in M3, once signals exist.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "tests/property/test_gate.py",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=repo,
+    )
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    detail = lines[-1] if lines else result.stderr.strip()[-200:]
+    status = "pass" if result.returncode == 0 else "fail"
+    return Outcome("ac-w-01", status, f"property part: {detail}; full-data part arrives in M3")
 
 
 def run(ac_id: str, checks: dict[str, Callable[[], Outcome]]) -> list[Outcome]:

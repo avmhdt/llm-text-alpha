@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 import re
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -83,7 +84,7 @@ class ClientStats:
 
 
 class SecClient:
-    """Rate-limited EDGAR HTTP client.
+    """Rate-limited EDGAR HTTP client, safe to share across threads.
 
     Args:
         user_agent: name plus contact email, sent on every request.
@@ -92,7 +93,7 @@ class SecClient:
         max_attempts: attempts per URL, including the first.
         backoff_base: first backoff in seconds; doubles per retry, plus up to 100% jitter.
         backoff_max: cap on a single backoff in seconds.
-        clock: monotonic clock in seconds, shared with the limiter.
+        clock: high-resolution monotonic clock in seconds, shared with the limiter.
         sleep: sleep function in seconds, shared with the limiter.
     """
 
@@ -104,7 +105,7 @@ class SecClient:
         max_attempts: int = 6,
         backoff_base: float = 1.0,
         backoff_max: float = 60.0,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.perf_counter,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.user_agent = validate_user_agent(user_agent)
@@ -112,6 +113,7 @@ class SecClient:
             raise SecConfigError(f"SEC_MAX_RPS={max_rps} must be in (0, {SEC_RPS_CEILING}]")
         self.max_rps = max_rps
         self.stats = ClientStats()
+        self._stats_lock = threading.Lock()
         self._clock = clock
         self._sleep = sleep
         self._bucket = TokenBucket(max_rps, clock=clock, sleep=sleep)
@@ -169,22 +171,34 @@ class SecClient:
         return delay
 
     def _before_sleep(self, state: RetryCallState) -> None:
-        self.stats.retries += 1
+        with self._stats_lock:
+            self.stats.retries += 1
         outcome = state.outcome
         status = None if outcome is None or outcome.failed else outcome.result().status_code
         delay = state.next_action.sleep if state.next_action is not None else None
         log.warning("sec_retry", attempt=state.attempt_number, status=status, delay=delay)
 
-    def _attempt(self, url: str) -> httpx.Response:
-        self.stats.throttled_seconds += self._bucket.acquire()
-        self.stats.requests += 1
-        self.stats.request_times.append(self._clock())
-        response = self._http.get(url)
-        self.stats.status_counts[response.status_code] += 1
+    def _attempt(
+        self, url: str, dest: Path | None = None, throttle: ByteThrottle | None = None
+    ) -> httpx.Response:
+        waited = self._bucket.acquire()
+        with self._stats_lock:
+            self.stats.throttled_seconds += waited
+            self.stats.requests += 1
+            self.stats.request_times.append(self._clock())
+        if dest is None:
+            response = self._http.get(url)
+        else:
+            with self._http.stream("GET", url) as response:
+                if response.status_code == 200:
+                    _stream_to(response, dest, throttle)
+        with self._stats_lock:
+            self.stats.status_counts[response.status_code] += 1
         return response
 
-    def get(self, url: str) -> httpx.Response:
-        """GET ``url`` with the limiter and retries; raise :class:`SecHttpError` on failure."""
+    def _request(
+        self, url: str, dest: Path | None = None, throttle: ByteThrottle | None = None
+    ) -> httpx.Response:
         retrying = Retrying(
             stop=stop_after_attempt(self._max_attempts),
             wait=self._wait,
@@ -197,25 +211,35 @@ class SecClient:
             retry_error_callback=lambda state: state.outcome.result() if state.outcome else None,
             reraise=True,
         )
-        response: httpx.Response = retrying(self._attempt, url)
+        response: httpx.Response = retrying(self._attempt, url, dest, throttle)
         if response.status_code != 200:
             raise SecHttpError(url, response.status_code)
         return response
+
+    def get(self, url: str) -> httpx.Response:
+        """GET ``url`` with the limiter and retries; raise :class:`SecHttpError` on failure."""
+        return self._request(url)
 
     def get_text(self, url: str) -> str:
         """GET ``url`` and decode the body."""
         return self.get(url).text
 
     def download(self, url: str, dest: Path, throttle: ByteThrottle | None = None) -> int:
-        """Fetch ``url`` to ``dest`` atomically under the byte cap; return the byte count."""
-        content = self.get(url).content
-        if throttle is not None:
-            throttle.consumed(len(content))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        temporary = dest.with_name(dest.name + ".tmp")
-        temporary.write_bytes(content)
-        temporary.replace(dest)
-        return len(content)
+        """Stream ``url`` to ``dest`` atomically, under the byte cap; return the byte count."""
+        self._request(url, dest, throttle)
+        return dest.stat().st_size
+
+
+def _stream_to(response: httpx.Response, dest: Path, throttle: ByteThrottle | None) -> None:
+    """Write a streamed body to ``dest`` through a temporary file, pacing each chunk."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    temporary = dest.with_name(dest.name + ".tmp")
+    with temporary.open("wb") as handle:
+        for chunk in response.iter_bytes(chunk_size=1 << 16):
+            handle.write(chunk)
+            if throttle is not None:
+                throttle.consumed(len(chunk))
+    temporary.replace(dest)
 
 
 def accession_folder(cik: int, accession: str) -> str:
@@ -235,12 +259,16 @@ def submissions_url(cik: int) -> str:
 
 @dataclass(frozen=True)
 class FilingHeader:
-    """Fields read from an SGML header. ``acceptance_ts_utc`` is the event time (DQ-01)."""
+    """Fields read from an SGML header. ``acceptance_ts_utc`` is the event time (DQ-01).
+
+    A few EDGAR headers carry an empty ``<ACCEPTANCE-DATETIME>``; with
+    ``require_acceptance=False`` those parse with ``acceptance_raw == ""`` and no time.
+    """
 
     accession: str
     form: str
     acceptance_raw: str
-    acceptance_ts_utc: datetime
+    acceptance_ts_utc: datetime | None
     filed_date: date
     items: tuple[str, ...]
     ciks: tuple[int, ...]
@@ -260,7 +288,7 @@ class HeaderParseError(ValueError):
 _TAG = re.compile(r"^<([A-Z0-9-]+)>(.*)$")
 
 
-def parse_header(text: str) -> FilingHeader:
+def parse_header(text: str, require_acceptance: bool = True) -> FilingHeader:
     """Parse an EDGAR ``.hdr.sgml`` (or the header block of a full submission).
 
     Items keep EDGAR's numbering, such as ``2.02``. The company name is the first filer's,
@@ -281,11 +309,15 @@ def parse_header(text: str) -> FilingHeader:
     accession = first("ACCESSION-NUMBER")
     if not _ACCESSION.match(accession):
         raise HeaderParseError(f"malformed accession {accession!r}")
-    acceptance_raw = first("ACCEPTANCE-DATETIME")
-    try:
-        acceptance = parse_acceptance(acceptance_raw)
-    except TimestampError as exc:
-        raise HeaderParseError(str(exc)) from exc
+    acceptance_raw = values.get("ACCEPTANCE-DATETIME", [""])[0]
+    acceptance: datetime | None = None
+    if acceptance_raw:
+        try:
+            acceptance = parse_acceptance(acceptance_raw)
+        except TimestampError as exc:
+            raise HeaderParseError(str(exc)) from exc
+    elif require_acceptance:
+        raise HeaderParseError("header has no <ACCEPTANCE-DATETIME>")
     filed = datetime.strptime(first("FILING-DATE"), "%Y%m%d").date()
     if "CIK" not in values:
         raise HeaderParseError("header has no <CIK>")

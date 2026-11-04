@@ -19,14 +19,14 @@ class TokenBucket:
 
     Args:
         rate: requests per second.
-        clock: monotonic clock in seconds.
+        clock: high-resolution monotonic clock in seconds.
         sleep: sleep function in seconds.
     """
 
     def __init__(
         self,
         rate: float,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.perf_counter,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if rate <= 0:
@@ -59,7 +59,7 @@ class ByteThrottle:
     def __init__(
         self,
         max_bytes_per_second: float = DEFAULT_MAX_BYTES_PER_SECOND,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.perf_counter,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if max_bytes_per_second <= 0:

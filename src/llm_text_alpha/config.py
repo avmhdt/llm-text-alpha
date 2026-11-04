@@ -71,3 +71,22 @@ def load_smoke(path: Path = SMOKE_CONFIG) -> SmokeConfig:
     if section is None:
         raise ConfigError(f"config {path} has no 'smoke' section")
     return SmokeConfig.model_validate(section)
+
+
+class UniverseConfig(BaseModel):
+    """The ``universe`` section (D-09): top N by market cap, event window."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    top_n_by_mcap: int = Field(gt=0)
+    start: date
+    end: date
+    estimation_data_start: date | None = None
+
+
+def load_universe(path: Path = DEFAULT_CONFIG) -> UniverseConfig:
+    """The ``universe`` section of ``path``."""
+    section = load_yaml(path).get("universe")
+    if section is None:
+        raise ConfigError(f"config {path} has no 'universe' section")
+    return UniverseConfig.model_validate(section)
