@@ -1,0 +1,23 @@
+# command=lta corpus build --doc-types 8k_item202 | run_id=c1eb783c-e19e-4957-b33b-4b90c40883f2 | git_sha=7de6a77560157c3acb7df91567df50dd2f05338c | provider=licensed
+transition,kind,filings_within_7d,agree,disagree
+2016-03-13,spring_forward,71,71,0
+2016-11-06,fall_back,685,685,0
+2017-03-12,spring_forward,91,91,0
+2017-11-05,fall_back,759,759,0
+2018-03-11,spring_forward,104,104,0
+2018-11-04,fall_back,845,845,0
+2019-03-10,spring_forward,98,98,0
+2019-11-03,fall_back,929,929,0
+2020-03-08,spring_forward,125,125,0
+2020-11-01,fall_back,1017,1017,0
+2021-03-14,spring_forward,98,98,0
+2021-11-07,fall_back,840,840,0
+2022-03-13,spring_forward,85,85,0
+2022-11-06,fall_back,907,907,0
+2023-03-12,spring_forward,85,85,0
+2023-11-05,fall_back,948,948,0
+2024-03-10,spring_forward,98,98,0
+2024-11-03,fall_back,981,981,0
+2025-03-09,spring_forward,113,113,0
+2025-11-02,fall_back,1067,1067,0
+2026-03-08,spring_forward,120,120,0
