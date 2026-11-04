@@ -122,3 +122,39 @@ When a filing has EX-99 exhibits, both baselines read those rather than the cove
 
 - **Loughran-McDonald:** counts Positive, Negative, Uncertainty, Litigious and Constraining words. A positive word is not counted when "no", "not" or "never" appears among the three words before it. `score = (pos - neg) / (pos + neg + 1)`.
 - **FinBERT:** `ProsusAI/finbert` at a pinned revision, over 512-token chunks that overlap by 64. It reads the first seven chunks, about 3,100 word pieces, close to the LLM's 3,000-token budget. The ablation therefore compares models on the same reading length. `score = P(positive) - P(negative)`.
+
+## LLM scoring (M4)
+
+### Request (FR-10)
+
+Each request has three parts:
+
+- **System prompt:** `configs/prompts/score_v1.md`, marked for prompt caching.
+- **User turn:** the release's EX-99 text, cut back to the last line break before 7,050 characters. That is about 3,000 tokens at the 2.35 characters per token measured on 200 releases.
+- **Output format:** the JSON schema of `LLMScore`.
+
+The answer has six fields: `score` in [-1, 1], `label`, `surprise` (-1, 0 or 1), `guidance` (-1, 0, 1 or null), `materiality` and `confidence` in [0, 1]. Pydantic validates it. A refused, truncated or invalid answer is retried once, synchronously. Both attempts are kept in the cache file and both are paid for.
+
+Haiku 5.5 runs with thinking disabled and effort low, and no sampling parameters (D-06). Determinism comes from the cache: an answer is generated once and reused.
+
+### Cache and spend (FR-11, FR-12)
+
+Every provider reads the response cache first. A hit costs nothing and writes no ledger entry.
+
+For the requests that miss, the spend tracker reserves the worst case before sending anything:
+
+- every input token at the higher of the input and cache-write rates, counting 2.0 characters per token;
+- plus the full 512 output tokens;
+- plus a synchronous retry for 2% of the requests.
+
+If the reservation would take committed spend past USD 25, the run stops before its first request. When results arrive, the reservation is settled with the cost computed from each response's `usage`.
+
+Batches are saved with their reservation, so a crashed run is collected, never resubmitted.
+
+### Samples
+
+| Sample | Events | Use |
+|---|---|---|
+| `item202_dev` | 200 releases before 2020 | Prompt checks; synchronous latency |
+| `item202_main` | 20,000, stratified by year, seed 7 | Main run, raw and (M6) masked |
+| `item202_post_h55` | Every event from 2026-07-01 (1,030) | Haiku 5.5's post-cutoff window, the primary test in [preregistration.md](preregistration.md) |

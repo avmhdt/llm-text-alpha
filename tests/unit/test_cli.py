@@ -140,6 +140,11 @@ def test_verify_all_runs_the_smoke(workdir: Path, monkeypatch: pytest.MonkeyPatc
         "check_figures",
         lambda figures, scorers: cli.verify_mod.Outcome("ac-w-02", "pass", "stub"),
     )
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "check_cost_latency",
+        lambda scores, calls: cli.verify_mod.Outcome("ac-w-10", "pass", "stub"),
+    )
     result = runner.invoke(cli.app, ["verify", "all"])
     assert result.exit_code == 0, result.output
     assert "PASS     ac-w-04: 2 checks ok" in result.output
