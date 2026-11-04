@@ -34,6 +34,7 @@ DOCUMENT_SCHEMA = pl.Schema(
         ("source", pl.String()),
         ("native_id", pl.String()),
         ("cik", pl.Int64()),
+        ("ciks", pl.List(pl.Int64())),
         ("doc_type", pl.String()),
         ("form", pl.String()),
         ("items", pl.List(pl.String())),
@@ -78,6 +79,30 @@ def iter_manifests(raw_root: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
         yield path.parent, json.loads(path.read_text("utf-8"))
 
 
+def unique_filings(raw_root: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """One folder per accession.
+
+    A filing with two filers in the universe is fetched under each filer's CIK. The copy
+    under the header's first filer is kept, else the lowest CIK; the document carries every
+    filer's CIK, and linking picks the one in the universe at the event date.
+    """
+    chosen: dict[str, tuple[Path, dict[str, Any]]] = {}
+    for folder, manifest in iter_manifests(raw_root):
+        accession = manifest["accession"]
+        first_filer = (manifest.get("ciks") or [manifest["cik"]])[0]
+        held = chosen.get(accession)
+        if held is None:
+            chosen[accession] = (folder, manifest)
+            continue
+        held_first = int(held[1]["cik"]) == int(first_filer)
+        mine_first = int(manifest["cik"]) == int(first_filer)
+        if (mine_first and not held_first) or (
+            mine_first == held_first and int(manifest["cik"]) < int(held[1]["cik"])
+        ):
+            chosen[accession] = (folder, manifest)
+    return sorted(chosen.values(), key=lambda item: item[0])
+
+
 @dataclass(frozen=True)
 class Extracted:
     """Result of extracting one filing: a document row, or a failure reason."""
@@ -119,6 +144,7 @@ def extract_filing(
             "source": "edgar",
             "native_id": accession,
             "cik": int(manifest["cik"]),
+            "ciks": [int(c) for c in manifest.get("ciks") or [manifest["cik"]]],
             "doc_type": DOC_TYPE_ITEM202,
             "form": manifest["form"],
             "items": list(manifest["items"]),
@@ -166,7 +192,7 @@ def build_item202(
     rows: list[dict[str, Any]] = []
     failures: list[tuple[str, int, str, int]] = []
     outside = 0
-    for n, (folder, manifest) in enumerate(iter_manifests(raw_root), start=1):
+    for n, (folder, manifest) in enumerate(unique_filings(raw_root), start=1):
         source = "header"
         if manifest["acceptance_ts_utc"]:
             accepted = datetime.fromisoformat(manifest["acceptance_ts_utc"])
@@ -211,11 +237,12 @@ def link_documents(documents: pl.DataFrame, pit_root: Path, top_n: int) -> pl.Da
     """Add ``permno``, ``ticker``, ``security_id`` and universe membership as of each event.
 
     ``permno`` is the number in the security id, Sharadar's permaticker for ``SHR:<n>``
-    (section 7b allows a provider id). The security is
-    the company's highest-ranked one in eqpit's universe at the last month end before the
-    event, else its first common security valid on the event date. ``in_universe`` is DQ-06:
-    the company ranked in the top ``top_n`` at that month end. Unlinked documents keep null
-    identifiers and never become signals.
+    (section 7b allows a provider id). Each filer CIK in ``ciks`` is a candidate. The one
+    ranked highest in eqpit's universe at the last month end before the event wins, and its
+    top security is used; with no candidate in the universe, the first filer with a common
+    security valid on the event date is linked. ``cik`` becomes the chosen filer.
+    ``in_universe`` is DQ-06: the chosen company ranked in the top ``top_n`` at that month
+    end. Unlinked documents keep null identifiers and never become signals.
     """
     from eqpit.store import PitStore
 
@@ -262,10 +289,36 @@ def link_documents(documents: pl.DataFrame, pit_root: Path, top_n: int) -> pl.Da
         {"_day": list(month_end_of), "_month_end": list(month_end_of.values())},
         schema={"_day": pl.Date, "_month_end": pl.Date},
     )
-    linked = (
-        keyed.join(month_ends, on="_day", how="left")
+    candidates = (
+        keyed.select("doc_id", "_day", "cik", "ciks")
+        .with_columns(
+            pl.when(pl.col("ciks").list.len() > 0)
+            .then(pl.col("ciks"))
+            .otherwise(pl.concat_list("cik"))
+            .alias("_cand")
+        )
+        .with_columns(pl.int_ranges(pl.col("_cand").list.len()).alias("_order"))
+        .select("doc_id", "_day", "_cand", "_order")
+        .explode("_cand", "_order")
+        .rename({"_cand": "cik"})
+        .join(month_ends, on="_day", how="left")
         .join(ranked, on=["cik", "_month_end"], how="left")
         .join(common, on=["cik", "_day"], how="left")
+    )
+    chosen = (
+        candidates.sort(
+            pl.col("rank").is_null(),
+            "rank",
+            pl.col("_fallback_security").is_null(),
+            "_order",
+        )
+        .group_by("doc_id", maintain_order=True)
+        .first()
+        .drop("_day", "_order")
+    )
+    linked = (
+        keyed.drop("cik")
+        .join(chosen, on="doc_id", how="left")
         .with_columns(
             pl.coalesce("_universe_security", "_fallback_security").alias("security_id"),
             pl.col("rank").is_not_null().alias("in_universe"),
@@ -323,7 +376,7 @@ def header_table(raw_root: Path) -> pl.DataFrame:
                 if d["type"].upper().startswith("EX-99")
             ],
         }
-        for _, manifest in iter_manifests(raw_root)
+        for _, manifest in unique_filings(raw_root)
     ]
     schema = pl.Schema(
         [
