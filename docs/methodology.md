@@ -158,3 +158,31 @@ Batches are saved with their reservation, so a crashed run is collected, never r
 | `item202_dev` | 200 releases before 2020 | Prompt checks; synchronous latency |
 | `item202_main` | 20,000, stratified by year, seed 7 | Main run, raw and (M6) masked |
 | `item202_post_h55` | Every event from 2026-07-01 (1,030) | Haiku 5.5's post-cutoff window, the primary test in [preregistration.md](preregistration.md) |
+
+## Portfolios, ablation and capacity (M5)
+
+### Long-short portfolio (FR-18)
+
+Events in the top trailing quintile go long and those in the bottom go short. Each enters at the open of its entry session, the same bar the gate assigns, and is held H = 5 or 20 sessions. Day 0 earns the open-to-close return; the position leaves at the close of the last session. Legs are equally weighted, and the long-short return is one dollar long minus one dollar short, on days when both legs hold a position.
+
+D-11 costs are 5, 10 or 20 bps one way by universe rank, charged on entry and on exit, at 1x and 2x. Alpha is the intercept of daily net returns on FF5, UMD and a PEAD factor, with Newey-West t at 10 lags. The PEAD factor is the gross long-short of SUE quintiles under the same rule.
+
+### Ablation (FR-19)
+
+The event set is every event LM, FinBERT and the LLM all scored, about 20,000. For each scorer and each combination (the mean of the members' trailing z-scores), the score is standardized again against the trailing 252 sessions of that same set. Each row then reports:
+
+- the Q5 - Q1 CAR[0,5] and CAR[0,20];
+- the IC;
+- the coefficient with size, momentum and SUE controls;
+- net alpha;
+- the cost per signal.
+
+LM reads the whole EX-99 text, FinBERT the first seven 512-token chunks, and the LLM the first 7,050 characters.
+
+### Capacity (FR-21)
+
+At AUM A per leg, each position is A divided by the leg's open positions on its entry day. It is capped at 10% of the stock's 20-session average dollar volume. Square-root impact, `0.1 x sigma x sqrt(q / ADV)`, is paid on entry and exit. The curve is reported net of all costs and with impact only.
+
+### Trials (FR-30)
+
+`lta eval trials` counts trial-log rows by family. It computes the Deflated Sharpe Ratio of the pre-registered portfolio from the number and dispersion of all portfolio trials.

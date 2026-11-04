@@ -1,0 +1,22 @@
+alpha_factors:
+- mktrf
+- smb
+- hml
+- rmw
+- cma
+- umd
+- pead
+cost_mult: 2.0
+costs_bps:
+  1-200: 5.0
+  201-500: 10.0
+  501-1000: 20.0
+doc_type: 8k_item202
+hold_days: 20
+masked: false
+model_id: ProsusAI/finbert@0bc2ac10dda6929bcb1f77ccc43c7ec5c424f031
+nw_lags: 10
+scorer: finbert
+weighting: equal
+window: post_h55
+window_start: '2026-07-01'

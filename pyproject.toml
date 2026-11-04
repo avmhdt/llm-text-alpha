@@ -89,7 +89,7 @@ files = ["src/llm_text_alpha"]
 mypy_path = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["exchange_calendars.*", "pyarrow.*", "lxml.*"]
+module = ["exchange_calendars.*", "pyarrow.*", "lxml.*", "statsmodels.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

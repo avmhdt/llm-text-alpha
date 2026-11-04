@@ -69,3 +69,77 @@ def event_study_figure(path: pl.DataFrame, title: str, caption: str, out: Path) 
     figure.savefig(out, dpi=120, metadata={"Software": None})
     plt.close(figure)
     return out
+
+
+def cumulative_returns_figure(
+    series: dict[str, pl.DataFrame], title: str, caption: str, out: Path
+) -> Path:
+    """Cumulative net long-short return (simple sum of daily returns, percent) per label."""
+    figure, axis = plt.subplots(figsize=(10, 4.5))
+    for label, frame in series.items():
+        ordered = frame.sort("date")
+        axis.plot(
+            ordered["date"].to_numpy(), ordered["ls_net"].cum_sum().to_numpy() * 100, label=label
+        )
+    axis.axhline(0, color="#cccccc", linewidth=0.8)
+    axis.set_ylabel("cumulative net return, % (sum of daily)")
+    axis.set_title(title)
+    axis.legend(fontsize=8)
+    figure.text(0.01, 0.01, caption, fontsize=7, color="#555555")
+    figure.tight_layout(rect=(0, 0.04, 1, 1))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out, dpi=120)
+    plt.close(figure)
+    return out
+
+
+def capacity_figure(curve: pl.DataFrame, title: str, caption: str, out: Path) -> Path:
+    """Net annual alpha (percent) against AUM per leg on a log axis."""
+    figure, axis = plt.subplots(figsize=(8, 4.5))
+    aum = curve["aum_usd"].to_numpy()
+    axis.plot(
+        aum,
+        curve["alpha_annual"].to_numpy() * 100,
+        marker="o",
+        label="net of D-11 costs and impact",
+    )
+    if "alpha_annual_impact_only" in curve.columns:
+        axis.plot(
+            aum,
+            curve["alpha_annual_impact_only"].to_numpy() * 100,
+            marker="s",
+            linestyle="--",
+            label="impact only (gross of D-11 costs)",
+        )
+    axis.legend(fontsize=8)
+    axis.set_xscale("log")
+    axis.axhline(0, color="#cccccc", linewidth=0.8)
+    axis.set_xlabel("AUM per leg, USD")
+    axis.set_ylabel("net alpha, % per year")
+    axis.set_title(title)
+    figure.text(0.01, 0.01, caption, fontsize=7, color="#555555")
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out, dpi=120)
+    plt.close(figure)
+    return out
+
+
+def ablation_figure(table: pl.DataFrame, title: str, caption: str, out: Path) -> Path:
+    """CAR[0,5] Q5 - Q1 spread (percent) with a 95% interval per scorer combination."""
+    figure, axis = plt.subplots(figsize=(9, 4.5))
+    labels = table["combination"].to_list()
+    spread = table["car5_spread"].to_numpy() * 100
+    t = table["t_car5_spread"].to_numpy()
+    err = [abs(s / tv) * 1.96 if tv else 0.0 for s, tv in zip(spread, t, strict=True)]
+    axis.bar(range(len(labels)), spread, yerr=err, color="#67a9cf", capsize=4)
+    axis.set_xticks(range(len(labels)), labels, rotation=30, ha="right", fontsize=8)
+    axis.axhline(0, color="#999999", linewidth=0.8)
+    axis.set_ylabel("CAR[0,5] Q5 - Q1, %")
+    axis.set_title(title)
+    figure.text(0.01, 0.01, caption, fontsize=7, color="#555555")
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out, dpi=120)
+    plt.close(figure)
+    return out

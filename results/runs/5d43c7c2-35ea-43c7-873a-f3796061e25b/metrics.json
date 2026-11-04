@@ -1,0 +1,19 @@
+{
+  "alpha_annual_net": -0.40274709954626126,
+  "car20_spread": 0.001143915656000461,
+  "car5_spread": 0.0012416675376282899,
+  "coef_controls": 0.000962947394753013,
+  "combination": "finbert",
+  "events": 20110,
+  "ic_car5": 0.012950866619265517,
+  "ic_monthly": 0.009349666996539913,
+  "reads": "finbert: first 7 chunks of 512 tokens",
+  "t_alpha_net": -3.2696380165268346,
+  "t_car20_spread": 0.5466960040909731,
+  "t_car5_spread": 0.9156882827321481,
+  "t_coef_controls": 2.1840590129457857,
+  "t_ic_monthly": 0.7621789902509084,
+  "usd_per_document": 0.0,
+  "usd_per_traded_signal": 0.0,
+  "window": "all"
+}

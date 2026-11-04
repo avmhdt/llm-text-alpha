@@ -14,7 +14,7 @@
 
 ## Requirements
 
-- [x] A text corpus with exact publication timestamps (SEC acceptance time, call time, news publish time). SEC acceptance times for 71,313 Item 2.02 8-Ks; transcripts are out of scope (D-07) and news arrives in M5. (FR-01, FR-02, FR-06)
+- [x] A text corpus with exact publication timestamps (SEC acceptance time, call time, news publish time). SEC acceptance times for 71,313 Item 2.02 8-Ks; transcripts are out of scope (D-07), and GDELT news was not ingested (FR-25 is a Should; see `docs/decisions.md`). (FR-01, FR-02, FR-06)
 - [x] Trades at the next available bar after each timestamp; returns labelled as abnormal returns against a factor model. (FR-07, FR-15, AC-W-01, AC-W-07)
 - [x] Baselines first: the Loughran–McDonald dictionary and FinBERT. Then LLM scores or embeddings. LM and FinBERT on 44,464 Item 2.02 releases (M3), then Claude Haiku 5.5 on 21,030 (M4). (FR-08, FR-09, FR-10)
 - [x] An event study of cumulative abnormal returns around each event, plus cross-sectional regressions controlling for size, momentum and earnings surprise (SUE). (FR-16, FR-17, AC-W-02, AC-W-08)
@@ -39,12 +39,12 @@ Raw and licensed data live in `data/`, which is git-ignored. Only download scrip
 ### Works (correct and reproducible)
 
 - [x] An automated test proves every signal timestamp precedes its trade timestamp. (AC-W-01: `tests/property/test_gate.py` and the full-data check)
-- [ ] Event-study plots with confidence bands for each method.
-- [ ] An ablation table comparing dictionary, FinBERT and LLM on the same events.
+- [x] Event-study plots with confidence bands for each method. LM, FinBERT, the Haiku 5.5 LLM and SUE, each with t and firm-bootstrap 95% bands (`reports/figures/event_study_*`). (FR-16, AC-W-02)
+- [x] An ablation table comparing dictionary, FinBERT and LLM on the same events. 20,110 identical events, every single scorer and combination, with CAR spread, IC, controlled coefficient, net alpha and cost per signal (`reports/tables/ablation.md`). (FR-19, AC-W-03)
 
 ### Impresses hirers
 
-- [ ] Incremental alpha over SUE and known factors with t > 3, net of costs.
+- [ ] Incremental alpha over SUE and known factors with t > 3, net of costs. **Not met.** The pre-registered test (Haiku 5.5 after its cutoff, H = 5, net of 1x costs, FF5 + UMD + PEAD) gives t = -0.51 over 60 days. No scorer has positive net alpha on the full sample either (`reports/tables/portfolio_alpha.md`). (FR-18, AC-H-01)
 - [ ] A contamination analysis: performance before vs after the model cutoff and with masked text, showing how much apparent alpha disappears.
 - [ ] Cost per signal and a realistic latency budget for live use.
 - [ ] A writeup that engages with the look-ahead-bias literature (for example Glasserman and Lin, 2023).

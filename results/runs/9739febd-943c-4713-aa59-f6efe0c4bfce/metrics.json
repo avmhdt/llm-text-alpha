@@ -1,0 +1,19 @@
+{
+  "alpha_annual_net": -0.31278024287268746,
+  "car20_spread": -0.0083489056636998,
+  "car5_spread": -0.008766907559086212,
+  "coef_controls": -0.0017030563356562063,
+  "combination": "lm+finbert",
+  "events": 937,
+  "ic_car5": -0.030117919905906336,
+  "ic_monthly": NaN,
+  "reads": "lm: all EX-99 text; finbert: first 7 chunks of 512 tokens",
+  "t_alpha_net": -0.43998126862430476,
+  "t_car20_spread": -0.8616299014982357,
+  "t_car5_spread": -1.2865608732507352,
+  "t_coef_controls": -0.795752444760477,
+  "t_ic_monthly": NaN,
+  "usd_per_document": 0.0,
+  "usd_per_traded_signal": 0.0,
+  "window": "post_h55"
+}

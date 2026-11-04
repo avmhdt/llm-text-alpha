@@ -31,10 +31,8 @@ class Outcome:
 
 
 PENDING = {
-    "ac-w-03": "M5",
     "ac-w-09": "M6",
     "ac-w-13": "M7",
-    "ac-h-01": "M5",
     "ac-h-02": "M6",
     "ac-h-03": "M6",
     "ac-h-04": "M7",
@@ -179,6 +177,50 @@ def check_cost_latency(scores_root: Path, calls_root: Path) -> Outcome:
     if problems:
         return Outcome("ac-w-10", "fail", "; ".join(problems))
     return Outcome("ac-w-10", "pass", "complete for " + ", ".join(counts))
+
+
+def _table(path: Path) -> pl.DataFrame:
+    """A committed CSV table; its first line is the provenance comment."""
+    return pl.read_csv(path, skip_rows=1)
+
+
+def check_ablation(tables: Path, scorers: list[str]) -> Outcome:
+    """AC-W-03: one ablation table on identical events, every scorer and combination, N shown."""
+    path = tables / "ablation.csv"
+    if not path.exists():
+        return Outcome("ac-w-03", "fail", f"no {path.as_posix()}")
+    table = _table(path).filter(pl.col("window") == "all")
+    wanted = set(scorers) | {"+".join(scorers)}
+    missing = wanted - set(table["combination"].to_list())
+    if missing:
+        return Outcome("ac-w-03", "fail", f"missing rows: {', '.join(sorted(missing))}")
+    sizes = table["events"].unique().to_list()
+    if len(sizes) != 1:
+        return Outcome("ac-w-03", "fail", f"rows use different event counts: {sizes}")
+    return Outcome(
+        "ac-w-03", "pass", f"{table.height} combinations on the same {sizes[0]:,} events"
+    )
+
+
+def check_headline(tables: Path, headline: dict[str, object]) -> Outcome:
+    """AC-H-01: the pre-registered portfolio's Newey-West t(alpha) above 3, net of 1x costs."""
+    path = tables / "portfolio_alpha.csv"
+    if not path.exists():
+        return Outcome("ac-h-01", "fail", f"no {path.as_posix()}")
+    table = _table(path)
+    row = table.filter(
+        (pl.col("scorer") == headline["scorer"])
+        & (pl.col("window") == headline["window"])
+        & (pl.col("hold_days") == headline["hold_days"])
+        & (pl.col("cost_mult") == headline["cost_mult"])
+    )
+    if row.is_empty():
+        return Outcome("ac-h-01", "fail", "no row for the pre-registered portfolio")
+    r = row.row(0, named=True)
+    detail = f"alpha {r['alpha_annual_net']:.2%}/yr, t {r['t_alpha_net']:.2f} over {r['days']} days"
+    if r["t_alpha_net"] > 3:
+        return Outcome("ac-h-01", "pass", detail)
+    return Outcome("ac-h-01", "fail", "not met (pre-registered, recorded as is): " + detail)
 
 
 def run(ac_id: str, checks: dict[str, Callable[[], Outcome]]) -> list[Outcome]:

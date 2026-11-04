@@ -215,3 +215,13 @@ def record_run(
     write_text_atomic(yaml.safe_dump(dict(config), sort_keys=True), run_dir / "config.yaml")
     write_json_atomic(dict(metrics), run_dir / "metrics.json")
     return run_dir
+
+
+def logged_params(log_path: Path, family: str) -> set[str]:
+    """Canonical ``params_json`` of every row of ``family`` already in the log."""
+    if not log_path.exists():
+        return set()
+    with log_path.open(encoding="utf-8", newline="") as handle:
+        return {
+            row["params_json"] for row in csv.DictReader(handle) if row["strategy_family"] == family
+        }

@@ -1,0 +1,95 @@
+{
+  "alpha_at_min_aum": -0.19651470058501344,
+  "aum_half": null,
+  "aum_zero": null,
+  "curve": [
+    {
+      "alpha_annual": -0.19651470058501344,
+      "aum_usd": 1000000.0,
+      "capped_share": 0.00026465528648934763,
+      "mean_impact_bps": 0.6069922538389402,
+      "mean_scale": 0.9998603872184729,
+      "scorer": "llm",
+      "sharpe_annual": -0.3198717353070793,
+      "t_alpha": -1.3104012549699195,
+      "window": "all"
+    },
+    {
+      "alpha_annual": -0.20185179755196517,
+      "aum_usd": 3000000.0,
+      "capped_share": 0.0033081910811168453,
+      "mean_impact_bps": 1.0444046121256831,
+      "mean_scale": 0.998972500584746,
+      "scorer": "llm",
+      "sharpe_annual": -0.34145868623242676,
+      "t_alpha": -1.3651162790952356,
+      "window": "all"
+    },
+    {
+      "alpha_annual": -0.19751403519096736,
+      "aum_usd": 10000000.0,
+      "capped_share": 0.023818975784041286,
+      "mean_impact_bps": 1.858433969269877,
+      "mean_scale": 0.9906294637584449,
+      "scorer": "llm",
+      "sharpe_annual": -0.35171364062317856,
+      "t_alpha": -1.3692014181890155,
+      "window": "all"
+    },
+    {
+      "alpha_annual": -0.1548303825321728,
+      "aum_usd": 30000000.0,
+      "capped_share": 0.09911340479026069,
+      "mean_impact_bps": 3.002116162178852,
+      "mean_scale": 0.9557688471003466,
+      "scorer": "llm",
+      "sharpe_annual": -0.276898625007763,
+      "t_alpha": -1.2132438389845004,
+      "window": "all"
+    },
+    {
+      "alpha_annual": -0.15034843410177254,
+      "aum_usd": 100000000.0,
+      "capped_share": 0.34087600899827974,
+      "mean_impact_bps": 4.552315814852702,
+      "mean_scale": 0.8276746752050153,
+      "scorer": "llm",
+      "sharpe_annual": -0.42218750987735193,
+      "t_alpha": -1.517529065610454,
+      "window": "all"
+    },
+    {
+      "alpha_annual": -0.10276864835866524,
+      "aum_usd": 300000000.0,
+      "capped_share": 0.6465528648934763,
+      "mean_impact_bps": 5.737389375410204,
+      "mean_scale": 0.5948401988681186,
+      "scorer": "llm",
+      "sharpe_annual": -0.4442563576892173,
+      "t_alpha": -1.5935390530270215,
+      "window": "all"
+    },
+    {
+      "alpha_annual": -0.05863845658183716,
+      "aum_usd": 1000000000.0,
+      "capped_share": 0.8942702130475056,
+      "mean_impact_bps": 6.3992862792734,
+      "mean_scale": 0.3089117129081035,
+      "scorer": "llm",
+      "sharpe_annual": -0.45361861428721456,
+      "t_alpha": -1.7087682359699443,
+      "window": "all"
+    },
+    {
+      "alpha_annual": -0.03497495019339506,
+      "aum_usd": 3000000000.0,
+      "capped_share": 0.9696969696969697,
+      "mean_impact_bps": 6.612293255934953,
+      "mean_scale": 0.13843592643184655,
+      "scorer": "llm",
+      "sharpe_annual": -0.5111530112599396,
+      "t_alpha": -1.8705306806361375,
+      "window": "all"
+    }
+  ]
+}

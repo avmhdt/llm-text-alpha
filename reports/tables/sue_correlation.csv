@@ -1,0 +1,8 @@
+# command=lta eval regress --scorers lm,finbert,llm --se both --window all | run_id=3e325cbe-a399-41ab-8898-ae02c2291edd | git_sha=68f21d2eb28ab73b547aabe6f34d3370b6c0ff0b-dirty | provider=licensed
+scorer,window,with,n,spearman
+lm,all,sue,41159,0.08220739376983538
+lm,all,sue_announced,38496,0.10765723098006473
+finbert,all,sue,41159,0.14262896617933568
+finbert,all,sue_announced,38496,0.22230445162803808
+llm,all,sue,18955,0.2833081430880613
+llm,all,sue_announced,17752,0.5075189245620259
