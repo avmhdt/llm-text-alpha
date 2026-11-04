@@ -49,7 +49,13 @@ def test_help_lists_groups() -> None:
 
 @pytest.mark.parametrize(
     "args",
-    [["eval", "portfolio"], ["corpus", "mask"], ["score", "llm"], ["eval", "trials"], ["repro"]],
+    [
+        ["eval", "portfolio"],
+        ["corpus", "mask"],
+        ["eval", "capacity"],
+        ["eval", "trials"],
+        ["repro"],
+    ],
 )
 def test_later_commands_say_when_they_arrive(args: list[str]) -> None:
     result = runner.invoke(cli.app, args)
@@ -133,6 +139,11 @@ def test_verify_all_runs_the_smoke(workdir: Path, monkeypatch: pytest.MonkeyPatc
         cli.verify_mod,
         "check_figures",
         lambda figures, scorers: cli.verify_mod.Outcome("ac-w-02", "pass", "stub"),
+    )
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "check_cost_latency",
+        lambda scores, calls: cli.verify_mod.Outcome("ac-w-10", "pass", "stub"),
     )
     result = runner.invoke(cli.app, ["verify", "all"])
     assert result.exit_code == 0, result.output

@@ -1,0 +1,16 @@
+# USD per million tokens, read off Anthropic's pricing page on `retrieved`. The spend tracker
+# refuses to run when this date is more than 45 days old (section 7f).
+source: https://platform.claude.com/docs/en/about-claude/pricing
+retrieved: 2026-11-04
+batch_discount: 0.5 # Batch API: 50% off input and output
+models:
+  claude-haiku-5-5:
+    # Prompts up to 100,000 tokens; a longer prompt pays the `long` card on the whole request.
+    input: 0.10
+    cache_write_5m: 0.125
+    cache_read: 0.01
+    output: 0.50
+    long_context_threshold: 100000
+    long: {input: 0.50, cache_write_5m: 0.625, cache_read: 0.05, output: 2.50}
+  claude-haiku-4-5: {input: 1.00, cache_write_5m: 1.25, cache_read: 0.10, output: 5.00}
+  claude-sonnet-4-6: {input: 3.00, cache_write_5m: 3.75, cache_read: 0.30, output: 15.00}
