@@ -1,0 +1,39 @@
+# Model registry (DQ-12). Cutoffs are quoted from each model's page on Anthropic's docs,
+# read on the date in `retrieved`. A model's post-cutoff window starts on the first day of
+# the month after its training data cutoff. `request` holds the non-default request fields,
+# checked against the Models API capabilities before any spend.
+claude-haiku-5-5:
+  provider: anthropic
+  training_data_cutoff: 2026-06
+  reliable_knowledge_cutoff: 2026-06
+  source: https://platform.claude.com/docs/en/about-claude/models/overview
+  retrieved: 2026-11-04
+  request:
+    thinking: {type: disabled}
+    output_config: {effort: low}
+claude-haiku-4-5:
+  provider: anthropic
+  training_data_cutoff: 2025-07
+  reliable_knowledge_cutoff: 2025-02
+  source: https://platform.claude.com/docs/en/models/haiku-4-5/overview
+  retrieved: 2026-11-04
+  request: {}
+claude-sonnet-4-6:
+  provider: anthropic
+  training_data_cutoff: 2026-01
+  reliable_knowledge_cutoff: 2025-08
+  source: https://platform.claude.com/docs/en/models/sonnet-4-6/overview
+  retrieved: 2026-11-04
+  request: {}
+llama-3.1-8b-instruct-q4_k_m:
+  provider: local
+  training_data_cutoff: 2023-12 # the model card sentence is quoted here at M6
+  source: https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
+  retrieved: null
+  request: {temperature: 0}
+fake-v1:
+  provider: fake
+  training_data_cutoff: null
+  source: deterministic test double, no network
+  retrieved: null
+  request: {}

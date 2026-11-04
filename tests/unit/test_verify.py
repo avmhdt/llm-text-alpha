@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import polars as pl
+
 from llm_text_alpha import verify
 from llm_text_alpha.tracking.trial_log import ensure_log
 
@@ -81,3 +83,27 @@ def test_figure_check(tmp_path: Path) -> None:
     assert verify.check_figures(tmp_path, ["lm"]).status == "fail"
     (tmp_path / "event_study_lm_8k_item202.png").write_bytes(b"png")
     assert verify.check_figures(tmp_path, ["lm"]).status == "pass"
+
+
+def test_cost_latency_check(tmp_path: Path) -> None:
+    from llm_text_alpha.scoring.llm.run import CALLS_SCHEMA
+
+    scores = tmp_path / "scores"
+    lm = scores / "scorer=lm"
+    lm.mkdir(parents=True)
+    pl.DataFrame({"scorer": ["lm"], "cost_usd": [0.0], "latency_ms": [1.0]}).write_parquet(
+        lm / "p.parquet"
+    )
+    calls = tmp_path / "calls"
+    calls.mkdir()
+    row = {name: None for name in CALLS_SCHEMA.names()}
+    good = pl.DataFrame(
+        [row | {"mode": "batch", "batch_turnaround_s": 60.0, "usd": 0.001}], schema=CALLS_SCHEMA
+    )
+    good.write_parquet(calls / "a.parquet")
+    assert verify.check_cost_latency(scores, calls).status == "pass"
+    bad = pl.DataFrame([row | {"mode": "sync", "usd": 0.001}], schema=CALLS_SCHEMA)
+    bad.write_parquet(calls / "b.parquet")
+    outcome = verify.check_cost_latency(scores, calls)
+    assert outcome.status == "fail" and "without latency" in outcome.detail
+    assert verify.check_cost_latency(tmp_path / "none", calls).status == "fail"

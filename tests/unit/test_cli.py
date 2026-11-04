@@ -49,7 +49,13 @@ def test_help_lists_groups() -> None:
 
 @pytest.mark.parametrize(
     "args",
-    [["eval", "portfolio"], ["corpus", "mask"], ["score", "llm"], ["eval", "trials"], ["repro"]],
+    [
+        ["eval", "portfolio"],
+        ["corpus", "mask"],
+        ["eval", "capacity"],
+        ["eval", "trials"],
+        ["repro"],
+    ],
 )
 def test_later_commands_say_when_they_arrive(args: list[str]) -> None:
     result = runner.invoke(cli.app, args)

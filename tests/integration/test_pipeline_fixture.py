@@ -7,6 +7,7 @@ random BERT stand in for the real inputs.
 from __future__ import annotations
 
 import csv
+import json
 import shutil
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -136,6 +137,21 @@ def test_pipeline_end_to_end(workdir: Path) -> None:
     assert "lm-LM_MasterDictionary@" in invoke("data", "lm-dict")
     invoke("score", "dict")
     invoke("score", "finbert", "--threads", "1")
+    llm = ("--provider", "fake", "--model", "fake-v1", "--sample", "item202_main")
+    assert "worst_case_usd: 0.0" in invoke("llm", "estimate", *llm)
+    first = invoke("score", "llm", *llm, "--run-id", "llm-first")
+    assert "0 cached, $0.0000" in first
+    again = invoke("score", "llm", *llm, "--run-id", "llm-again")
+    n_docs = int(first.strip().splitlines()[-1].split(" ")[0])
+    assert f"{n_docs} cached" in again
+    llm_dir = workdir / "data" / "processed" / "scores" / "scorer=llm"
+    llm_scores = pl.read_parquet(llm_dir / "model=fake-v1" / "masked=false" / "*.parquet")
+    assert llm_scores.height == n_docs and llm_scores["cost_usd"].is_not_null().all()
+    calls = pl.read_parquet(workdir / "data" / "llm_cache" / "llm_calls" / "*.parquet")
+    assert calls.filter(pl.col("run_id") == "llm-again")["mode"].unique().to_list() == ["cache_hit"]
+    metrics = json.loads((workdir / "results" / "runs" / "llm-first" / "metrics.json").read_text())
+    assert metrics["status"] == "done" and metrics["estimate"]["worst_case_usd"] == 0.0
+    assert "open holds included" in invoke("llm", "spend")
     out = invoke("signals", "build", "--scorers", "lm,finbert")
     assert "finbert" in out and "lm" in out
     assert "kept" in invoke("eval", "abnormal")

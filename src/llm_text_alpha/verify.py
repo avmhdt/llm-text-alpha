@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+import polars as pl
+
 from llm_text_alpha.tracking import trial_log
 
 MAX_TRACKED_BYTES = 1_000_000
@@ -30,10 +32,7 @@ class Outcome:
 
 PENDING = {
     "ac-w-03": "M5",
-    "ac-w-05": "M4",
-    "ac-w-06": "M4",
     "ac-w-09": "M6",
-    "ac-w-10": "M4",
     "ac-w-13": "M7",
     "ac-h-01": "M5",
     "ac-h-02": "M6",
@@ -143,6 +142,43 @@ def check_figures(figures: Path, scorers: list[str]) -> Outcome:
     if missing:
         return Outcome("ac-w-02", "fail", f"no figure for {', '.join(missing)}")
     return Outcome("ac-w-02", "pass", f"figures for {', '.join(scorers)} in {figures.as_posix()}")
+
+
+def check_cost_latency(scores_root: Path, calls_root: Path) -> Outcome:
+    """AC-W-10: cost on every score; latency on sync, local, FinBERT and dictionary rows;
+    batch turnaround on every batch call."""
+    problems: list[str] = []
+    counts: list[str] = []
+    for folder in sorted(scores_root.glob("scorer=*")):
+        files = list(folder.rglob("*.parquet"))
+        if not files:
+            continue
+        frame = pl.read_parquet(files, columns=["scorer", "cost_usd", "latency_ms"])
+        name = folder.name.removeprefix("scorer=")
+        counts.append(f"{name} {frame.height}")
+        if frame["cost_usd"].null_count():
+            problems.append(f"{name}: {frame['cost_usd'].null_count()} rows without cost_usd")
+        if name != "llm" and frame["latency_ms"].null_count():
+            problems.append(f"{name}: {frame['latency_ms'].null_count()} rows without latency_ms")
+    calls_files = list(calls_root.rglob("*.parquet")) if calls_root.exists() else []
+    if calls_files:
+        calls = pl.read_parquet(calls_files)
+        counts.append(f"llm_calls {calls.height}")
+        timed = calls.filter(pl.col("mode").is_in(["sync", "local"]))
+        if timed["latency_ms"].null_count():
+            problems.append(f"{timed['latency_ms'].null_count()} sync/local calls without latency")
+        batch = calls.filter(pl.col("mode") == "batch")
+        if batch["batch_turnaround_s"].null_count():
+            problems.append(
+                f"{batch['batch_turnaround_s'].null_count()} batch calls without turnaround"
+            )
+        if calls["usd"].null_count():
+            problems.append(f"{calls['usd'].null_count()} calls without usd")
+    if not counts:
+        return Outcome("ac-w-10", "fail", f"no scores under {scores_root.as_posix()}")
+    if problems:
+        return Outcome("ac-w-10", "fail", "; ".join(problems))
+    return Outcome("ac-w-10", "pass", "complete for " + ", ".join(counts))
 
 
 def run(ac_id: str, checks: dict[str, Callable[[], Outcome]]) -> list[Outcome]:

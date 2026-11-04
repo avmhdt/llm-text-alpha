@@ -34,7 +34,10 @@ scorers:
     prompt: configs/prompts/score_v1.md
     max_input_tokens: 3000 # truncation keeps the start of EX-99.1
     max_output_tokens: 512
+    chars_per_token: 2.35 # count_tokens on 200 releases: p5 2.39, median 2.76 (docs/decisions.md)
+    models: configs/models.yaml
     samples:
+      item202_dev: {doc_type: 8k_item202, n: 200, stratify: year, seed: 3, before: "2020-01-01"}
       item202_main: {doc_type: 8k_item202, n: 20000, stratify: year, seed: 7}
       item202_contam: {doc_type: 8k_item202, n: 3000, stratify: [year, cutoff_window], seed: 11}
     runs:

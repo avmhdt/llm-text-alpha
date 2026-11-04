@@ -6,9 +6,11 @@ exit with code 2 and say which milestone brings them.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import json
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import polars as pl
 import structlog
@@ -36,7 +38,7 @@ from llm_text_alpha.logging import configure_logging, log_path
 from llm_text_alpha.reporting.tables import write_table
 from llm_text_alpha.scoring import dictionary, finbert
 from llm_text_alpha.settings import DataPlacementError, Settings, check_data_placement, get_settings
-from llm_text_alpha.tracking.trial_log import DEFAULT_LOG, new_run_id
+from llm_text_alpha.tracking.trial_log import DEFAULT_LOG, new_run_id, record_run
 
 if TYPE_CHECKING:
     from eqpit.store import PitStore
@@ -57,6 +59,8 @@ score_app = typer.Typer(
     help="Score documents with the dictionary, FinBERT and LLMs.", no_args_is_help=True
 )
 app.add_typer(score_app, name="score")
+llm_app = typer.Typer(help="LLM spend estimates, ledger and batches.", no_args_is_help=True)
+app.add_typer(llm_app, name="llm")
 
 LOGS_DIR = Path("logs")
 ConfigOpt = Annotated[Path, typer.Option("--config", help="Experiment config YAML.")]
@@ -289,6 +293,258 @@ def score_finbert(
     typer.echo(f"{scored} documents scored this run with {model.model_id}")
 
 
+@dataclass(frozen=True)
+class _LLMJob:
+    provider: Any
+    requests: list[Any]
+    prompt_version: str
+    sample: str
+    n_docs: int
+    cache_root: Path
+
+
+def _llm_job(
+    settings: Settings,
+    config: Path,
+    provider: str,
+    model: str,
+    sample: str,
+    masked: bool,
+    max_docs: int | None,
+    run_id: str,
+    cache_root: Path | None = None,
+) -> _LLMJob:
+    from llm_text_alpha.scoring.llm import prompts as llm_prompts
+    from llm_text_alpha.scoring.llm import run as llm_run
+    from llm_text_alpha.scoring.llm.cache import ResponseCache
+    from llm_text_alpha.scoring.llm.registry import ModelRegistry
+
+    if masked:
+        typer.echo("error: masked text arrives in M6", err=True)
+        raise typer.Exit(2)
+    cfg = load_yaml(config)
+    llm_cfg = cfg["scorers"]["llm"]
+    spec = llm_cfg["samples"].get(sample)
+    if spec is None:
+        typer.echo(f"error: no sample {sample!r} in {config}", err=True)
+        raise typer.Exit(2)
+    registry = ModelRegistry.load(Path(llm_cfg.get("models", "configs/models.yaml")))
+    model_spec = registry.get(model)
+    if model_spec.provider != provider:
+        typer.echo(f"error: {model} is a {model_spec.provider} model, not {provider}", err=True)
+        raise typer.Exit(2)
+    docs = pipeline.scorable(pipeline.load_documents(pipeline.Paths.of(settings))).filter(
+        pl.col("doc_type") == spec.get("doc_type", "8k_item202")
+    )
+    if spec.get("before"):
+        cutoff = datetime.fromisoformat(str(spec["before"])).replace(tzinfo=UTC)
+        docs = docs.filter(pl.col("event_ts_utc") < cutoff)
+    chosen = llm_run.draw_sample(
+        docs, int(spec["n"]), spec.get("stratify", "year"), int(spec["seed"])
+    )
+    if max_docs is not None:
+        chosen = chosen.head(max_docs)
+    prompt = llm_prompts.load_prompt(Path(llm_cfg["prompt"]))
+    max_chars = int(int(llm_cfg["max_input_tokens"]) * float(llm_cfg["chars_per_token"]))
+    requests = llm_prompts.build_requests(
+        chosen, model, prompt, max_chars, int(llm_cfg["max_output_tokens"]), model_spec.request
+    )
+    root = cache_root or settings.llm_cache_path
+    instance = llm_run.make_provider(
+        provider,
+        settings,
+        registry,
+        ResponseCache(root),
+        run_id,
+        Path(cfg["budget"]["price_table"]),
+    )
+    return _LLMJob(instance, requests, prompt.version, sample, chosen.height, root)
+
+
+ProviderOpt = Annotated[str, typer.Option(help="anthropic, local or fake.")]
+ModelOpt = Annotated[str, typer.Option(help="Model id from configs/models.yaml.")]
+SampleOpt = Annotated[str, typer.Option(help="Sample name from the config.")]
+ModeOpt = Annotated[str, typer.Option(help="batch or sync.")]
+
+
+@llm_app.command("estimate")
+def llm_estimate(
+    provider: ProviderOpt = "anthropic",
+    model: ModelOpt = "claude-haiku-5-5",
+    sample: SampleOpt = "item202_main",
+    masked: Annotated[bool, typer.Option(help="Masked text (M6).")] = False,
+    mode: ModeOpt = "batch",
+    max_docs: Annotated[int | None, typer.Option(help="Score only the first N.")] = None,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Docs, tokens, worst-case USD and remaining budget; never spends or calls the API."""
+    settings, resolved = _start("llm estimate", run_id)
+    job = _llm_job(settings, config, provider, model, sample, masked, max_docs, resolved)
+    estimate = job.provider.estimate_cost(job.requests, mode)
+    lines = {
+        "sample": sample,
+        "model": model,
+        "mode": mode,
+        "documents": job.n_docs,
+        "already_cached": estimate.n_cached,
+        "worst_case_input_tokens": estimate.input_tokens,
+        "max_output_tokens": estimate.max_output_tokens,
+        "worst_case_usd": round(estimate.worst_case_usd, 4),
+    }
+    if provider == "anthropic":
+        tracker = job.provider.tracker
+        lines["committed_usd"] = round(tracker.committed_usd(), 4)
+        lines["budget_usd"] = tracker.budget_usd
+        lines["remaining_usd"] = round(tracker.budget_usd - tracker.committed_usd(), 4)
+    for key, value in lines.items():
+        typer.echo(f"{key}: {value}")
+
+
+@llm_app.command("calibrate")
+def llm_calibrate(
+    model: ModelOpt = "claude-haiku-5-5",
+    sample: SampleOpt = "item202_main",
+    n: Annotated[int, typer.Option(help="Documents to count.")] = 200,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Characters per token of the document text, from the free token-counting endpoint."""
+    import dataclasses
+
+    settings, resolved = _start("llm calibrate", run_id)
+    job = _llm_job(settings, config, "anthropic", model, sample, False, n, resolved)
+    base = job.provider.count_tokens(dataclasses.replace(job.requests[0], user_text="."))
+    ratios = []
+    for request in job.requests:
+        tokens = job.provider.count_tokens(request) - base + 1
+        ratios.append(len(request.user_text) / max(tokens, 1))
+    series = pl.Series("chars_per_token", ratios)
+    summary = {
+        "documents": series.len(),
+        "prompt_overhead_tokens": base,
+        **{f"p{q}": round(float(series.quantile(q / 100) or 0.0), 3) for q in (1, 5, 25, 50, 75)},
+    }
+    record_run(resolved, {"command": "llm calibrate", "model": model, "n": n}, summary)
+    for key, value in summary.items():
+        typer.echo(f"{key}: {value}")
+
+
+@llm_app.command("spend")
+def llm_spend(
+    by: Annotated[str, typer.Option(help="model or run.")] = "model",
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Settled spend from the ledger against LLM_BUDGET_USD."""
+    from llm_text_alpha.scoring.llm import run as llm_run
+
+    settings, _ = _start("llm spend", run_id)
+    tracker = llm_run.tracker(settings, Path(load_yaml(config)["budget"]["price_table"]))
+    for key, usd in tracker.totals(by):
+        typer.echo(f"{key}: ${usd:.4f}")
+    committed = tracker.committed_usd()
+    typer.echo(f"committed ${committed:.4f} of ${tracker.budget_usd:.2f} (open holds included)")
+
+
+@llm_app.command("batches")
+def llm_batches(
+    provider: ProviderOpt = "anthropic",
+    model: ModelOpt = "claude-haiku-5-5",
+    sample: SampleOpt = "item202_main",
+    poll: Annotated[bool, typer.Option(help="Show open batches.")] = True,
+    collect: Annotated[bool, typer.Option(help="Wait for and collect open batches.")] = False,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Resume batches left open by a crash: poll, collect and settle, never resubmit."""
+    settings, resolved = _start("llm batches", run_id)
+    job = _llm_job(settings, config, provider, model, sample, False, None, resolved)
+    batches_file = job.cache_root / "batches.json"
+    open_ids: list[str] = []
+    if batches_file.exists():
+        entries = json.loads(batches_file.read_text("utf-8"))
+        open_ids = [b for b, e in entries.items() if e.get("status") == "submitted"]
+    if poll:
+        typer.echo(f"{len(open_ids)} open batches: {', '.join(open_ids) or '-'}")
+    if collect and open_ids:
+        results = job.provider.resume(job.requests)
+        typer.echo(f"collected {len(results)} results")
+
+
+@score_app.command("llm")
+def score_llm(
+    provider: ProviderOpt = "fake",
+    model: ModelOpt = "fake-v1",
+    sample: SampleOpt = "item202_main",
+    masked: Annotated[bool, typer.Option(help="Masked text (M6).")] = False,
+    mode: ModeOpt = "batch",
+    max_docs: Annotated[int | None, typer.Option(help="Score only the first N.")] = None,
+    dry_run: Annotated[bool, typer.Option(help="Estimate only.")] = False,
+    bypass_cache: Annotated[
+        bool, typer.Option(help="D-06 check only: score into a fresh cache under this run id.")
+    ] = False,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Score a sample through the provider abstraction, cache and spend tracker (FR-10)."""
+    from llm_text_alpha.scoring.llm import run as llm_run
+
+    settings, resolved = _start("score llm", run_id)
+    root = settings.llm_cache_path / "rescore" / resolved if bypass_cache else None
+    job = _llm_job(settings, config, provider, model, sample, masked, max_docs, resolved, root)
+    estimate = job.provider.estimate_cost(job.requests, mode)
+    plan = {
+        "sample": sample,
+        "model": model,
+        "provider": provider,
+        "mode": mode,
+        "documents": job.n_docs,
+        "already_cached": estimate.n_cached,
+        "worst_case_input_tokens": estimate.input_tokens,
+        "worst_case_usd": estimate.worst_case_usd,
+        "prompt_version": job.prompt_version,
+        "bypass_cache": bypass_cache,
+    }
+    typer.echo(f"estimate: {json.dumps(plan, sort_keys=True)}")
+    if dry_run:
+        return
+    config_record = {"command": "score llm", "config": str(config), **plan}
+    record_run(resolved, config_record, {"estimate": plan, "status": "started"}, DEFAULT_LOG)
+    started = datetime.now(UTC)
+    results = job.provider.score(job.requests, mode)
+    run = llm_run.tables(results, provider, job.prompt_version, masked, resolved)
+    if bypass_cache:
+        scores_dir = job.cache_root / "scores"
+        calls_dir = job.cache_root / "llm_calls"
+    else:
+        model_dir = f"model={model}/masked={str(masked).lower()}"
+        scores_dir = pipeline.Paths.of(settings).scores("llm") / model_dir
+        calls_dir = settings.llm_cache_path / "llm_calls"
+    llm_run.write_tables(run, scores_dir, calls_dir, resolved)
+    calls = run.calls
+    metrics = {
+        "estimate": plan,
+        "started_at": started.isoformat(),
+        "ended_at": datetime.now(UTC).isoformat(),
+        "requests": calls.height,
+        "cache_hits": int((calls["mode"] == "cache_hit").sum()),
+        "schema_valid": int(calls["schema_valid"].sum()),
+        "refusals": int((calls["stop_reason"] == "refusal").sum()),
+        "retried": int((calls["attempts"] > 1).sum()),
+        "usd": float(calls["usd"].sum()),
+        "input_tokens": int(calls["input_tokens"].sum()),
+        "cache_read_tokens": int(calls["cache_read_tokens"].sum()),
+        "output_tokens": int(calls["output_tokens"].sum()),
+    }
+    metrics["status"] = "done"
+    record_run(resolved, config_record, metrics, DEFAULT_LOG)
+    typer.echo(
+        f"{metrics['requests']} requests, {metrics['schema_valid']} valid, "
+        f"{metrics['cache_hits']} cached, ${metrics['usd']:.4f}"
+    )
+
+
 def _efp_store(settings: Settings) -> PitStore:
     from eqpit.store import PitStore
 
@@ -494,8 +750,29 @@ def verify(
         detail = "failed: " + ", ".join(failed) if failed else f"{len(report.checks)} checks ok"
         return verify_mod.Outcome("ac-w-04", status, detail)
 
+    def ac_w_10() -> verify_mod.Outcome:
+        settings, _ = _start("verify ac-w-10", run_id)
+        return verify_mod.check_cost_latency(
+            pipeline.Paths.of(settings).root / "processed" / "scores",
+            settings.llm_cache_path / "llm_calls",
+        )
+
     checks = {
         "ac-w-04": ac_w_04,
+        "ac-w-05": lambda: verify_mod.run_pytest(
+            "ac-w-05", repo, ["tests/integration/test_cache_rerun.py"]
+        ),
+        "ac-w-06": lambda: verify_mod.run_pytest(
+            "ac-w-06",
+            repo,
+            [
+                "tests/unit/test_spend.py",
+                "tests/property/test_spend.py",
+                "tests/unit/test_no_direct_client.py",
+                "tests/unit/test_anthropic_provider.py::test_budget_cap_blocks_before_any_network_call",
+            ],
+        ),
+        "ac-w-10": ac_w_10,
         "ac-w-01": lambda: verify_mod.check_gate_properties(repo),
         "ac-w-02": lambda: verify_mod.check_figures(
             repo / "reports" / "figures", ["lm", "finbert"]
@@ -537,14 +814,6 @@ _LATER: dict[str, list[tuple[str, str, str]]] = {
         ("mask", "M6", "Mask entities and dates"),
         ("audit-mask", "M6", "Report residual masking hits"),
     ],
-    "score": [
-        ("llm", "M4", "LLM scores through the provider abstraction"),
-    ],
-    "llm": [
-        ("estimate", "M4", "Print docs, tokens and worst-case USD without spending"),
-        ("spend", "M4", "Print ledger totals against LLM_BUDGET_USD"),
-        ("batches", "M4", "Resume open batches"),
-    ],
     "eval": [
         ("portfolio", "M5", "Calendar-time long-short portfolio"),
         ("ablation", "M5", "Ablation on the intersection event set"),
@@ -557,7 +826,6 @@ _LATER: dict[str, list[tuple[str, str, str]]] = {
 }
 
 _GROUP_HELP = {
-    "llm": "LLM spend estimates, ledger and batches.",
     "report": "Regenerate figures and tables.",
 }
 
