@@ -1,0 +1,8 @@
+ar_model: ff5umd
+doc_type: 8k_item202
+horizon: 5
+regressors:
+- score_z
+scorer: finbert
+se: fm
+spec: score_only
