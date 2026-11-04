@@ -2,7 +2,7 @@
 
 > Score filings, transcripts and news with language models, and prove the result is not leakage or memorization.
 
-**Status:** in progress. M1 (scaffold, CI, data-access smoke test) is built; see [docs/decisions.md](docs/decisions.md).
+**Status:** in progress. M1 to M3 are built: corpus, timestamp gate, returns, controls and the dictionary and FinBERT baselines. See [docs/decisions.md](docs/decisions.md).
 
 | | |
 |---|---|
@@ -14,10 +14,10 @@
 
 ## Requirements
 
-- [ ] A text corpus with exact publication timestamps (SEC acceptance time, call time, news publish time).
-- [ ] Trades at the next available bar after each timestamp; returns labelled as abnormal returns against a factor model.
+- [x] A text corpus with exact publication timestamps (SEC acceptance time, call time, news publish time). SEC acceptance times for 71,313 Item 2.02 8-Ks; transcripts are out of scope (D-07) and news arrives in M5. (FR-01, FR-02, FR-06)
+- [x] Trades at the next available bar after each timestamp; returns labelled as abnormal returns against a factor model. (FR-07, FR-15, AC-W-01, AC-W-07)
 - [ ] Baselines first: the Loughran–McDonald dictionary and FinBERT. Then LLM scores or embeddings.
-- [ ] An event study of cumulative abnormal returns around each event, plus cross-sectional regressions controlling for size, momentum and earnings surprise (SUE).
+- [x] An event study of cumulative abnormal returns around each event, plus cross-sectional regressions controlling for size, momentum and earnings surprise (SUE). (FR-16, FR-17, AC-W-02, AC-W-08)
 - [ ] Contamination controls: test only after each model’s training cutoff, and rerun on text with company names and dates masked.
 - [ ] Inference cost and latency tracked per document.
 
@@ -38,7 +38,7 @@ Raw and licensed data live in `data/`, which is git-ignored. Only download scrip
 
 ### Works (correct and reproducible)
 
-- [ ] An automated test proves every signal timestamp precedes its trade timestamp.
+- [x] An automated test proves every signal timestamp precedes its trade timestamp. (AC-W-01: `tests/property/test_gate.py` and the full-data check)
 - [ ] Event-study plots with confidence bands for each method.
 - [ ] An ablation table comparing dictionary, FinBERT and LLM on the same events.
 
