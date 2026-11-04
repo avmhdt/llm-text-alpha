@@ -221,5 +221,12 @@ def test_git_sha_in_a_repository(tmp_path: Path) -> None:
     trial_log.ensure_log(log)
     clean = trial_log.git_sha(log)
     assert len(clean) == 40 and not clean.endswith("-dirty")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "table.csv").write_text("a\n", "utf-8")
+    git("add", "reports/table.csv")
+    git("commit", "-q", "-m", "table")
+    clean = trial_log.git_sha(log)
+    (tmp_path / "reports" / "table.csv").write_text("b\n", "utf-8")
+    assert trial_log.git_sha(log) == clean
     (tmp_path / "code.py").write_text("x = 2\n", "utf-8")
     assert trial_log.git_sha(log) == clean + "-dirty"
