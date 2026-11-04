@@ -63,7 +63,12 @@ def new_run_id() -> str:
 
 
 def git_sha(log_path: Path) -> str:
-    """HEAD commit, with ``-dirty`` if tracked files other than the log have changes."""
+    """HEAD commit, with ``-dirty`` if tracked code or config has uncommitted changes.
+
+    The log itself and the generated outputs under ``results/`` and ``reports/`` do not
+    count: an evaluation rewrites its own tables, which would otherwise mark every later
+    run in the same session dirty.
+    """
 
     def git(*args: str) -> str:
         return subprocess.run(
@@ -83,6 +88,8 @@ def git_sha(log_path: Path) -> str:
             "--",
             ".",
             f":(exclude){log}",
+            ":(exclude)results",
+            ":(exclude)reports",
         )
     except (OSError, ValueError, subprocess.CalledProcessError):
         return "0" * 40 + "-dirty"

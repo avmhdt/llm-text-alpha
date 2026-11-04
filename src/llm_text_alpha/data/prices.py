@@ -17,12 +17,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import httpx
 import polars as pl
 
 from llm_text_alpha.settings import Settings
+
+if TYPE_CHECKING:
+    from eqpit.store import PitStore
 
 ProviderName = Literal["efp", "sharadar", "crsp", "free"]
 PROTOTYPE_LABEL = "prototype, survivorship-biased"
@@ -271,4 +274,89 @@ def resolve_provider(
         return FreePrices(Path(settings.stooq_dir), free_tickers)
     raise ProviderUnavailableError(
         f"no price provider available for {choice!r}: set EFP_DATA_DIR or SHARADAR_API_KEY"
+    )
+
+
+PROVIDER_EFP = "efp"
+
+
+def universe_monthly(store: PitStore, start: date, end: date, top_n: int) -> pl.DataFrame:
+    """Top ``top_n`` by market cap at every month end in ``[start, end]`` (DQ-06).
+
+    Columns: ``month_end, security_id, company_id, cik, rank, mcap``. Companies keyed by a
+    Sharadar id rather than a CIK keep a null ``cik``.
+    """
+    frames = [
+        store.universe(m, top_n)
+        .select("security_id", "company_id", "rank", "mcap")
+        .with_columns(pl.lit(m).alias("month_end"))
+        for m in store.month_ends(start, end)
+    ]
+    if not frames:
+        raise ProviderUnavailableError(f"no month ends between {start} and {end}")
+    return (
+        pl.concat(frames)
+        .with_columns(
+            pl.when(pl.col("company_id").str.starts_with("CIK:"))
+            .then(pl.col("company_id").str.strip_prefix("CIK:").cast(pl.Int64))
+            .alias("cik")
+        )
+        .select("month_end", "security_id", "company_id", "cik", "rank", "mcap")
+        .sort("month_end", "rank")
+    )
+
+
+def link_table(store: PitStore, month_ends: list[date]) -> pl.DataFrame:
+    """CIK to security, permno (Sharadar permaticker) and ticker, as date ranges (DQ-15).
+
+    Built from the securities valid at each month end, so a range starts at the first
+    month end a link was seen and ends at the last. ``PitStore`` exposes securities only as
+    of a date, which sets this monthly resolution; documents are linked by exact event
+    date in ``corpus build``.
+    """
+    rows = pl.concat(
+        [
+            store.securities(m)
+            .select("security_id", "cik", "permaticker", "ticker", "share_type")
+            .with_columns(pl.lit(m).alias("seen"))
+            for m in month_ends
+        ]
+    )
+    return (
+        rows.group_by("security_id", "cik", "permaticker", "ticker", "share_type")
+        .agg(pl.col("seen").min().alias("valid_from"), pl.col("seen").max().alias("valid_to"))
+        .rename({"permaticker": "permno"})
+        .sort("cik", "security_id", "valid_from")
+    )
+
+
+def prices_daily(store: PitStore, end: date, n_sessions: int, ids: list[str]) -> pl.DataFrame:
+    """Daily prices for ``ids`` over the ``n_sessions`` sessions ending at ``end`` (section 7b).
+
+    ``open`` and ``close`` are unadjusted USD. ``ret`` is eqpit's close-to-close total
+    return, split- and distribution-aware. ``ret_open_close`` is the entry-day return
+    (close over open, same shares); ``ret_close_open`` is the overnight return that
+    completes ``ret``. Daily delisting returns are not merged: eqpit exposes them only in
+    its monthly labels, and Sharadar has no delisting-return field (D-01).
+    """
+    frame = store.prices(end, n_sessions, ids)
+    return (
+        frame.with_columns((pl.col("close") / pl.col("open") - 1.0).alias("ret_open_close"))
+        .with_columns(
+            ((1.0 + pl.col("ret")) / (1.0 + pl.col("ret_open_close")) - 1.0).alias("ret_close_open")
+        )
+        .select(
+            "security_id",
+            "date",
+            "open",
+            "close",
+            "ret",
+            "ret_open_close",
+            "ret_close_open",
+            "volume",
+            "shares_out",
+            "mcap",
+            pl.lit(PROVIDER_EFP).alias("provider"),
+        )
+        .sort("security_id", "date")
     )

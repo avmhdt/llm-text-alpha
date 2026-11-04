@@ -1,0 +1,10 @@
+ar_model: ff5umd
+bootstrap_reps: 1000
+doc_type: 8k_item202
+masked: false
+model_id: srw
+scorer: sue
+seed: 20261030
+window:
+- -10
+- 60

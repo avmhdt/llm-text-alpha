@@ -49,7 +49,7 @@ def test_help_lists_groups() -> None:
 
 @pytest.mark.parametrize(
     "args",
-    [["data", "prices"], ["corpus", "mask"], ["score", "llm"], ["eval", "trials"], ["repro"]],
+    [["eval", "portfolio"], ["corpus", "mask"], ["score", "llm"], ["eval", "trials"], ["repro"]],
 )
 def test_later_commands_say_when_they_arrive(args: list[str]) -> None:
     result = runner.invoke(cli.app, args)
@@ -110,9 +110,9 @@ def test_verify_repository_criteria(workdir: Path) -> None:
     assert "PASS" in result.output
     result = runner.invoke(cli.app, ["verify", "AC-W-12"])
     assert result.exit_code == 0, result.output
-    result = runner.invoke(cli.app, ["verify", "ac-w-02"])
+    result = runner.invoke(cli.app, ["verify", "ac-w-03"])
     assert result.exit_code == 0
-    assert "PENDING  ac-w-02: arrives in M3" in result.output
+    assert "PENDING  ac-w-03: arrives in M5" in result.output
     result = runner.invoke(cli.app, ["verify", "ac-x-99"])
     assert result.exit_code == 1
 
@@ -123,6 +123,16 @@ def test_verify_all_runs_the_smoke(workdir: Path, monkeypatch: pytest.MonkeyPatc
         cli.verify_mod,
         "check_gate_properties",
         lambda repo: cli.verify_mod.Outcome("ac-w-01", "pass", "stub"),
+    )
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "run_pytest",
+        lambda ac_id, repo, targets, markers="": cli.verify_mod.Outcome(ac_id, "pass", "stub"),
+    )
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "check_figures",
+        lambda figures, scorers: cli.verify_mod.Outcome("ac-w-02", "pass", "stub"),
     )
     result = runner.invoke(cli.app, ["verify", "all"])
     assert result.exit_code == 0, result.output

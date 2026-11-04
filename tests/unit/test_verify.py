@@ -69,8 +69,15 @@ def test_gate_property_check_reports_pytest(tmp_path: Path) -> None:
     target = tmp_path / "tests" / "property" / "test_gate.py"
     target.parent.mkdir(parents=True)
     target.write_text("def test_ok():\n    assert True\n", "utf-8")
-    outcome = verify.check_gate_properties(tmp_path)
+    outcome = verify.run_pytest("ac-w-01", tmp_path, ["tests/property/test_gate.py"])
     assert outcome.status == "pass"
     assert "1 passed" in outcome.detail
     target.write_text("def test_bad():\n    assert False\n", "utf-8")
     assert verify.check_gate_properties(tmp_path).status == "fail"
+    assert verify.run_pytest("x", tmp_path, ["tests/property/test_gate.py"]).status == "fail"
+
+
+def test_figure_check(tmp_path: Path) -> None:
+    assert verify.check_figures(tmp_path, ["lm"]).status == "fail"
+    (tmp_path / "event_study_lm_8k_item202.png").write_bytes(b"png")
+    assert verify.check_figures(tmp_path, ["lm"]).status == "pass"

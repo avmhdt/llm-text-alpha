@@ -29,12 +29,9 @@ class Outcome:
 
 
 PENDING = {
-    "ac-w-02": "M3",
     "ac-w-03": "M5",
     "ac-w-05": "M4",
     "ac-w-06": "M4",
-    "ac-w-07": "M3",
-    "ac-w-08": "M3",
     "ac-w-09": "M6",
     "ac-w-10": "M4",
     "ac-w-13": "M7",
@@ -119,29 +116,33 @@ def check_trial_log(log_path: Path) -> Outcome:
     return Outcome("ac-w-11", "pass", f"header ok; {rows} rows in {log_path.as_posix()}")
 
 
-def check_gate_properties(repo: Path) -> Outcome:
-    """AC-W-01, property part: the hypothesis suite in ``tests/property/test_gate.py``.
-
-    The full-data part (every real signal) joins in M3, once signals exist.
-    """
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "tests/property/test_gate.py",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=repo,
-    )
+def run_pytest(ac_id: str, repo: Path, targets: list[str], markers: str = "") -> Outcome:
+    """Pass when ``pytest`` passes on ``targets``; the detail is pytest's summary line."""
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *targets]
+    if markers:
+        command += ["-m", markers]
+    result = subprocess.run(command, capture_output=True, text=True, cwd=repo)
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     detail = lines[-1] if lines else result.stderr.strip()[-200:]
-    status = "pass" if result.returncode == 0 else "fail"
-    return Outcome("ac-w-01", status, f"property part: {detail}; full-data part arrives in M3")
+    return Outcome(ac_id, "pass" if result.returncode == 0 else "fail", detail)
+
+
+def check_gate_properties(repo: Path) -> Outcome:
+    """AC-W-01: the hypothesis suite, then the check on every real signal (``-m data``)."""
+    prop = run_pytest("ac-w-01", repo, ["tests/property/test_gate.py"])
+    full = run_pytest(
+        "ac-w-01", repo, ["tests/integration/test_signal_precedes_trade_full.py"], "data"
+    )
+    status = "pass" if prop.status == full.status == "pass" else "fail"
+    return Outcome("ac-w-01", status, f"property: {prop.detail}; full data: {full.detail}")
+
+
+def check_figures(figures: Path, scorers: list[str]) -> Outcome:
+    """AC-W-02: one event-study figure per scorer."""
+    missing = [s for s in scorers if not (figures / f"event_study_{s}_8k_item202.png").exists()]
+    if missing:
+        return Outcome("ac-w-02", "fail", f"no figure for {', '.join(missing)}")
+    return Outcome("ac-w-02", "pass", f"figures for {', '.join(scorers)} in {figures.as_posix()}")
 
 
 def run(ac_id: str, checks: dict[str, Callable[[], Outcome]]) -> list[Outcome]:
