@@ -446,3 +446,49 @@ def run_regressions(
     table = pl.DataFrame(rows)
     write_table(table, report.tables, "regressions", report.command, report.run_id, report.label)
     return table
+
+
+def run_pead_check(paths: Paths, model: str, report: Report) -> pl.DataFrame:
+    """PEAD sanity check (section 11): CAR[+1,+60] by SUE quintile, reported not asserted.
+
+    Bernard and Thomas (1989) find high-minus-low SUE drift is positive. ``t`` is the
+    Welch statistic of the difference between the top and bottom quintile means.
+    """
+    from llm_text_alpha.reporting.tables import write_table
+
+    folder = paths.abnormal / f"model={model}"
+    events = pl.read_parquet(folder / "events.parquet").filter(pl.col("drop_reason").is_null())
+    car = (
+        pl.read_parquet(folder / "ar.parquet")
+        .join(events.select("doc_id"), on="doc_id", how="semi")
+        .filter(pl.col("rel_day").is_between(1, 60))
+        .group_by("doc_id")
+        .agg(pl.col("ar").fill_null(0.0).sort().sum().alias("car_1_60"))
+    )
+    sue = _one_scorer(pl.read_parquet(paths.signals), "sue").filter(pl.col("quintile") > 0)
+    data = sue.join(car, on="doc_id", how="inner")
+    table = (
+        data.group_by("quintile")
+        .agg(
+            pl.len().alias("n"),
+            pl.col("car_1_60").mean().alias("car_1_60"),
+            (pl.col("car_1_60").std() / pl.len().sqrt()).alias("se"),
+        )
+        .sort("quintile")
+        .with_columns(pl.format("Q{}", pl.col("quintile")).alias("group"))
+        .select("group", "n", "car_1_60", "se")
+    )
+    top, bottom = table.row(-1, named=True), table.row(0, named=True)
+    diff = top["car_1_60"] - bottom["car_1_60"]
+    se = (top["se"] ** 2 + bottom["se"] ** 2) ** 0.5
+    table = pl.concat(
+        [
+            table,
+            pl.DataFrame(
+                {"group": ["Q5-Q1"], "n": [top["n"] + bottom["n"]], "car_1_60": [diff], "se": [se]},
+                schema=table.schema,
+            ),
+        ]
+    ).with_columns((pl.col("car_1_60") / pl.col("se")).alias("t"))
+    write_table(table, report.tables, "pead_sanity", report.command, report.run_id, report.label)
+    return table

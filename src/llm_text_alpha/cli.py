@@ -431,6 +431,10 @@ def eval_event_study(
     settings, resolved = _start("eval event-study", run_id)
     cfg = load_yaml(config)
     report = _report(f"lta eval event-study --scorers {scorers}", resolved, config)
+    if "sue" in scorers.split(","):
+        pead = pipeline.run_pead_check(pipeline.Paths.of(settings), model, report)
+        spread = pead.row(-1, named=True)
+        typer.echo(f"PEAD: Q5-Q1 SUE CAR[1,60] {spread['car_1_60']:.4%} (t {spread['t']:.2f})")
     for scorer in scorers.split(","):
         summary = pipeline.run_event_study(
             pipeline.Paths.of(settings),
