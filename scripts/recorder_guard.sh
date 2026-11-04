@@ -22,8 +22,8 @@ while true; do
       echo "$(date -u +%FT%TZ) resumed ($worst us)" >> "$LOG"
     fi
   fi
-  if ! pgrep -f "finbert_loop.sh" >/dev/null && [ "$paused" = 0 ]; then
-    echo "$(date -u +%FT%TZ) finbert loop ended; guard exits" >> "$LOG"; exit 0
+  if ! pgrep -f "lta score finbert" >/dev/null && [ "$paused" = 0 ]; then
+    echo "$(date -u +%FT%TZ) FinBERT ended; guard exits" >> "$LOG"; exit 0
   fi
   sleep 300
 done
