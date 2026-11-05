@@ -19,7 +19,7 @@ import polars as pl
 
 from llm_text_alpha.scoring.common import scoring_text
 from llm_text_alpha.scoring.llm.base import ScoreRequest
-from llm_text_alpha.scoring.llm.schema import LLM_SCORE_SCHEMA, LLMScore
+from llm_text_alpha.scoring.llm.schema import ANSWERS, LLM_SCORE_SCHEMA
 
 
 @dataclass(frozen=True)
@@ -82,9 +82,9 @@ def build_requests(
     return requests
 
 
-def parse_payload(raw_text: str) -> tuple[LLMScore | None, bool]:
-    """Validate a response's JSON text; return the score and whether it was valid."""
+def parse_payload(raw_text: str, answer: str = "score") -> tuple[Any, bool]:
+    """Validate a reply's JSON text against ``ANSWERS[answer]``; return it and whether valid."""
     try:
-        return LLMScore.model_validate(json.loads(raw_text)), True
+        return ANSWERS[answer].model_validate(json.loads(raw_text)), True
     except (ValueError, TypeError):
         return None, False

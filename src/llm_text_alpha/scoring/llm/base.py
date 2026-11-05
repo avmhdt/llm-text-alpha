@@ -8,8 +8,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from llm_text_alpha.scoring.llm.schema import LLMScore
-
 Mode = Literal["batch", "sync"]
 
 
@@ -44,6 +42,9 @@ class ScoreRequest:
     output_schema: Mapping[str, Any]
     max_output_tokens: int
     request_params: Mapping[str, Any] = field(default_factory=dict)
+    answer: str = "score"
+    """Which pydantic model validates the reply (``schema.ANSWERS``); not part of the key,
+    because the schema already is."""
 
     def prompt_hash(self) -> str:
         """sha256 of the canonical JSON of prompt, text, schema and parameters."""
@@ -67,7 +68,7 @@ class ScoreResult:
 
     doc_id: str
     model_id: str
-    payload: LLMScore | None
+    payload: Any
     stop_reason: str
     usage: TokenUsage
     usd: float

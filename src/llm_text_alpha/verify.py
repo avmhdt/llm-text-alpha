@@ -31,14 +31,12 @@ class Outcome:
 
 
 PENDING = {
-    "ac-w-09": "M6",
     "ac-w-13": "M7",
     "ac-h-02": "M6",
     "ac-h-03": "M6",
     "ac-h-04": "M7",
     "ac-h-05": "M5",
     "ac-h-06": "M5",
-    "ac-h-07": "M6",
     "ac-h-08": "M5",
 }
 
@@ -221,6 +219,49 @@ def check_headline(tables: Path, headline: dict[str, object]) -> Outcome:
     if r["t_alpha_net"] > 3:
         return Outcome("ac-h-01", "pass", detail)
     return Outcome("ac-h-01", "fail", "not met (pre-registered, recorded as is): " + detail)
+
+
+def check_masking(tables: Path, review_log: Path) -> Outcome:
+    """AC-W-09: residual name/ticker and year hits each in at most 1% of masked documents,
+    and the 50-document manual review logged."""
+    path = tables / "mask_audit.csv"
+    if not path.exists():
+        return Outcome("ac-w-09", "fail", f"no {path.as_posix()}")
+    audit = dict(_table(path).select("metric", "value").iter_rows())
+    names = float(audit["share_with_residual_name_or_ticker"])
+    years = float(audit["share_with_residual_year"])
+    reviewed = review_log.exists() and "## Manual review" in review_log.read_text("utf-8")
+    detail = (
+        f"{int(audit['documents']):,} documents; residual names {names:.2%}, years {years:.2%}; "
+        f"manual review {'logged' if reviewed else 'missing'}"
+    )
+    ok = names <= 0.01 and years <= 0.01 and reviewed
+    return Outcome("ac-w-09", "pass" if ok else "fail", detail)
+
+
+def check_preregistration(repo: Path, log_path: Path) -> Outcome:
+    """AC-H-07: the pre-registration commit precedes the first contamination run, and that
+    run's ``params_json`` holds the pre-registration SHA."""
+    sha = _git(repo, "log", "-1", "--format=%H", "--", "docs/preregistration.md").strip()
+    if not sha:
+        return Outcome("ac-h-07", "fail", "docs/preregistration.md is not committed")
+    when = _git(repo, "log", "-1", "--format=%cI", sha).strip()
+    with log_path.open(encoding="utf-8", newline="") as handle:
+        rows = [r for r in csv.DictReader(handle) if r["strategy_family"] == "contamination"]
+    if not rows:
+        return Outcome("ac-h-07", "fail", "no contamination run in the trial log")
+    first = min(rows, key=lambda r: r["timestamp"])
+    from datetime import datetime
+
+    committed = datetime.fromisoformat(when)
+    ran = datetime.fromisoformat(first["timestamp"].replace("Z", "+00:00"))
+    has_sha = sha in first["params_json"]
+    ok = committed < ran and has_sha
+    detail = (
+        f"pre-registration {sha[:7]} committed {committed.isoformat()}; first contamination run "
+        f"{ran.isoformat()}; SHA in params_json: {has_sha}"
+    )
+    return Outcome("ac-h-07", "pass" if ok else "fail", detail)
 
 
 def run(ac_id: str, checks: dict[str, Callable[[], Outcome]]) -> list[Outcome]:

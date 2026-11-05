@@ -143,3 +143,31 @@ def ablation_figure(table: pl.DataFrame, title: str, caption: str, out: Path) ->
     figure.savefig(out, dpi=120)
     plt.close(figure)
     return out
+
+
+def contamination_figure(cells: pl.DataFrame, title: str, caption: str, out: Path) -> Path:
+    """Q5 - Q1 CAR[0,5] (percent) with 95% intervals in the four contamination cells."""
+    figure, axis = plt.subplots(figsize=(7, 4.5))
+    order = [("raw", "pre"), ("raw", "post"), ("masked", "pre"), ("masked", "post")]
+    labels, values, lows, highs, colors = [], [], [], [], []
+    for text, window in order:
+        row = cells.filter((pl.col("text") == text) & (pl.col("window") == window))
+        if row.is_empty():
+            continue
+        r = row.row(0, named=True)
+        labels.append(f"{text}, {window}\nN={r['n']}" + (" (low N)" if r["underpowered"] else ""))
+        values.append(r["spread"] * 100)
+        lows.append((r["spread"] - r["spread_lo95"]) * 100)
+        highs.append((r["spread_hi95"] - r["spread"]) * 100)
+        colors.append("#2166ac" if text == "raw" else "#67a9cf")
+    axis.bar(range(len(values)), values, yerr=[lows, highs], color=colors, capsize=4)
+    axis.set_xticks(range(len(labels)), labels, fontsize=8)
+    axis.axhline(0, color="#999999", linewidth=0.8)
+    axis.set_ylabel("CAR[0,5] Q5 - Q1, %")
+    axis.set_title(title)
+    figure.text(0.01, 0.01, caption, fontsize=7, color="#555555")
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out, dpi=120)
+    plt.close(figure)
+    return out
