@@ -153,6 +153,12 @@ class AnthropicProvider:
         )
         return worst * max(1, int(len(requests) * 0.02) + 1)
 
+    def model_info(self, model_id: str) -> dict[str, Any]:
+        """The Models API record (lifecycle, retirement date, capabilities); free, no spend."""
+        info: Any = self._client.models.retrieve(model_id)
+        record: dict[str, Any] = info.model_dump(mode="json")
+        return record
+
     def count_tokens(self, request: ScoreRequest) -> int:
         """Prompt tokens for ``request`` from the free token-counting endpoint (no spend)."""
         params = self.params(request)

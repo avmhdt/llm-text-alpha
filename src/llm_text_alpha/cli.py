@@ -433,6 +433,40 @@ def llm_calibrate(
         typer.echo(f"{key}: {value}")
 
 
+@llm_app.command("models")
+def llm_models(
+    models: Annotated[str, typer.Option(help="Comma-separated Anthropic model ids.")] = (
+        "claude-haiku-5-5,claude-haiku-4-5,claude-sonnet-4-6"
+    ),
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Lifecycle and retirement date of each model from the Models API (D-04); no spend."""
+    from llm_text_alpha.scoring.llm import run as llm_run
+    from llm_text_alpha.scoring.llm.cache import ResponseCache
+    from llm_text_alpha.scoring.llm.registry import ModelRegistry
+
+    settings, resolved = _start("llm models", run_id)
+    cfg = load_yaml(config)
+    registry = ModelRegistry.load(Path(cfg["scorers"]["llm"].get("models", "configs/models.yaml")))
+    provider: Any = llm_run.make_provider(
+        "anthropic",
+        settings,
+        registry,
+        ResponseCache(settings.llm_cache_path),
+        resolved,
+        Path(cfg["budget"]["price_table"]),
+    )
+    for model_id in models.split(","):
+        info = provider.model_info(model_id)
+        caps = info.get("capabilities") or {}
+        structured = caps.get("structured_outputs", {}).get("supported")
+        typer.echo(
+            f"{model_id}: lifecycle {info.get('lifecycle')}, retires_at {info.get('retires_at')}, "
+            f"deprecated_at {info.get('deprecated_at')}, structured outputs {structured}"
+        )
+
+
 @llm_app.command("spend")
 def llm_spend(
     by: Annotated[str, typer.Option(help="model or run.")] = "model",
