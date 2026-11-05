@@ -68,11 +68,29 @@ The rules and NER repeat until the text stops changing, so masking is idempotent
 Financial figures stay unmasked, so a model can still recognize a company from its numbers.
 The re-identification probe measures how often it does.
 
-AUDIT_PLACEHOLDER
+## Audit (AC-W-09)
+
+`lta corpus audit-mask` (`reports/tables/mask_audit.md`) covers the 21,782 masked documents in mask version `m2@f47398b1`. It searches each document's masked text for every variant of the filer's names (current and former EDGAR names, short forms and brand word) in any case, with or without an apostrophe before a final s, and for the filer's ticker.
+
+| Measure | Share of documents |
+|---|---|
+| A residual name or ticker | 0.00% |
+| A residual year from 1990 to 2030 | 0.00% |
+| A lower-case English word equal to a one-word short name, such as "waste" for Waste Management (counted apart; it does not name the company) | 1.98% |
+
+Both AC-W-09 limits (at most 1%) are met. Per document, on average, the masker replaced 22.4 company names, 1.8 tickers, 4.3 people, 7.7 places, 8.9 dates, 5.5 years and 19.2 periods.
 
 ## Manual review
 
-REVIEW_PLACEHOLDER
+The review read 50 random masked documents (seed 7, `review.md` next to the masked parquet), three times, as the rules were fixed. The first 1,500 characters of each were read in full; scores and returns were not looked at.
+
+| Round | Mask version | Documents with a filer name or brand visible | What was found | Fix |
+|---|---|---|---|---|
+| 1 | `m1@b87e5281` (first rules) | 2 of the 25 read (CISCO, the spaced EVERCORE logo) | one-word brand forms (CISCO for CISCO SYSTEMS), capitalized dateline cities (CHARLOTTE, SEATTLE, KANSAS CITY), street addresses; spaCy masking EPS, EBITDA and "millions" as names | brand word of multi-word names; dateline and address rules; keep-list of financial terms |
+| 2 | `m1@84737f28` | 6 of 50 | "Moody's" (EDGAR: MOODYS), "McKesson" (mixed case), "3M" (two characters), "LABCORP", a letter-spaced logo (E V E R C O R E), a second ticker (NYSE: ROLL, RBCP); datelines ending in `--(BUSINESS WIRE)` (ELGIN, PHILADELPHIA, SAN FRANCISCO); towns before a state that spaCy tagged as an organization (Oxford, Riverwoods). The stricter audit added after this round found lower-case brands (lululemon, eBay, nVent, agilon) in 2.5% of documents | apostrophe-tolerant names; capital-first any-case one-word names; digits allow two characters; extra tickers; more dateline forms; town-before-state rule; one-word names that are not English words (Loughran-McDonald word list) match in any case |
+| 3 | `m2@f47398b1` (used for every masked score) | 2 of 50 | the filer: LABCORP (a brand not derivable from LABORATORY CORP OF AMERICA HOLDINGS) and the letter-spaced EVERCORE logo. Other identifying text: contact or analyst names spaCy missed (3 documents), place fragments (an address without a street suffix plus a ZIP code, "Burlington", "El" of El Dorado; 3 documents), product or segment brands (ONPATTRO, Accelera; 2 documents), a listing venue (STAR Market; 1 document) | none; recorded as residual leakage |
+
+In the final round, 10 of the 50 documents still hold something that could help a reader identify the company: 2 filer names or brands and 8 other clues. Figures, product lines and industry descriptions ("a leading motion picture exhibitor") remain by design. The masked results are therefore a lower bound on how much memorization masking removes, and the re-identification probe measures how often a model still names the company.
 
 ## Probes
 

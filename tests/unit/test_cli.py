@@ -50,10 +50,8 @@ def test_help_lists_groups() -> None:
 @pytest.mark.parametrize(
     "args",
     [
-        ["eval", "contamination"],
-        ["corpus", "mask"],
-        ["eval", "latency"],
-        ["corpus", "audit-mask"],
+        ["data", "gdelt"],
+        ["report", "build"],
         ["repro"],
     ],
 )
@@ -116,9 +114,9 @@ def test_verify_repository_criteria(workdir: Path) -> None:
     assert "PASS" in result.output
     result = runner.invoke(cli.app, ["verify", "AC-W-12"])
     assert result.exit_code == 0, result.output
-    result = runner.invoke(cli.app, ["verify", "ac-w-09"])
+    result = runner.invoke(cli.app, ["verify", "ac-w-13"])
     assert result.exit_code == 0
-    assert "PENDING  ac-w-09: arrives in M6" in result.output
+    assert "PENDING  ac-w-13: arrives in M7" in result.output
     result = runner.invoke(cli.app, ["verify", "ac-x-99"])
     assert result.exit_code == 1
 
@@ -144,6 +142,16 @@ def test_verify_all_runs_the_smoke(workdir: Path, monkeypatch: pytest.MonkeyPatc
         cli.verify_mod,
         "check_cost_latency",
         lambda scores, calls: cli.verify_mod.Outcome("ac-w-10", "pass", "stub"),
+    )
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "check_masking",
+        lambda tables, log: cli.verify_mod.Outcome("ac-w-09", "pass", "stub"),
+    )
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "check_preregistration",
+        lambda repo, log: cli.verify_mod.Outcome("ac-h-07", "pass", "stub"),
     )
     monkeypatch.setattr(
         cli.verify_mod,

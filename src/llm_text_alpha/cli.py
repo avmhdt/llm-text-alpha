@@ -1232,6 +1232,14 @@ def score_probes(
                     (ans.period_year, ans.period_quarter) == truth if ans and truth else None
                 ),
                 "confidence": ans.confidence if ans else None,
+                "guess_company": ans.company if ans else None,
+                "guess_ticker": ans.ticker if ans else None,
+                "guess_year": ans.period_year if ans else None,
+                "guess_quarter": ans.period_quarter if ans else None,
+                "true_company": doc["company_name"],
+                "true_ticker": doc["ticker"],
+                "true_year": truth[0] if truth else None,
+                "true_quarter": truth[1] if truth else None,
                 "usd": res.usd,
             }
         )
@@ -1468,7 +1476,7 @@ def eval_latency(
         paths, ["doc_id", "event_ts_utc", "doc_type", "excluded"]
     ).filter((pl.col("doc_type") == "8k_item202") & ~pl.col("excluded"))
     local = docs["event_ts_utc"].dt.convert_time_zone("America/New_York")
-    minutes = local.dt.hour() * 60 + local.dt.minute()
+    minutes = local.dt.hour().cast(pl.Int32) * 60 + local.dt.minute().cast(pl.Int32)
     in_session = float(((minutes >= 570) & (minutes < 960)).mean())  # type: ignore[arg-type]
     components = pl.DataFrame(
         [
@@ -1505,10 +1513,12 @@ def eval_latency(
     trial_log.log_trial(
         rid, "latency", params, None, None, 0, None, None, report.trial_log, run_kind="analysis"
     )
-    typer.echo(
-        f"fetch+parse p50 {fetch['p50_ms']:.0f} ms, p95 {fetch['p95_ms']:.0f} ms; "
-        f"{in_session:.1%} of releases accepted during the regular session"
+    fetched = (
+        f"fetch+parse p50 {fetch['p50_ms']:.0f} ms, p95 {fetch['p95_ms']:.0f} ms"
+        if fetch["n"]
+        else "no live fetch"
     )
+    typer.echo(f"{fetched}; {in_session:.1%} of releases accepted during the regular session")
 
 
 @app.command("verify")

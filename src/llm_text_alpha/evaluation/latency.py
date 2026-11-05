@@ -97,17 +97,19 @@ def budget(
 ) -> pl.DataFrame:
     """Acceptance-to-order latency per scorer at p50 and p95, dissemination excluded."""
     rows = []
+    f50, f95 = fetch_ms.get("p50_ms") or 0.0, fetch_ms.get("p95_ms") or 0.0
+    d50, d95 = decision_ms.get("p50_ms") or 0.0, decision_ms.get("p95_ms") or 0.0
     for r in scoring.iter_rows(named=True):
         if r.get("p50_ms") is None:
             continue
         rows.append(
             {
                 "scorer": r["scorer"],
-                "fetch_parse_p50_ms": fetch_ms["p50_ms"],
+                "fetch_parse_p50_ms": f50,
                 "score_p50_ms": r["p50_ms"],
-                "decision_p50_ms": decision_ms["p50_ms"],
-                "total_p50_ms": fetch_ms["p50_ms"] + r["p50_ms"] + decision_ms["p50_ms"],
-                "total_p95_ms": fetch_ms["p95_ms"] + r["p95_ms"] + decision_ms["p95_ms"],
+                "decision_p50_ms": d50,
+                "total_p50_ms": f50 + r["p50_ms"] + d50,
+                "total_p95_ms": f95 + r["p95_ms"] + d95,
             }
         )
     return pl.DataFrame(rows)

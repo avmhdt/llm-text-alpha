@@ -242,10 +242,15 @@ def check_masking(tables: Path, review_log: Path) -> Outcome:
 def check_preregistration(repo: Path, log_path: Path) -> Outcome:
     """AC-H-07: the pre-registration commit precedes the first contamination run, and that
     run's ``params_json`` holds the pre-registration SHA."""
-    sha = _git(repo, "log", "-1", "--format=%H", "--", "docs/preregistration.md").strip()
+    try:
+        sha = _git(repo, "log", "-1", "--format=%H", "--", "docs/preregistration.md").strip()
+    except subprocess.CalledProcessError:
+        sha = ""
     if not sha:
         return Outcome("ac-h-07", "fail", "docs/preregistration.md is not committed")
     when = _git(repo, "log", "-1", "--format=%cI", sha).strip()
+    if not log_path.exists():
+        return Outcome("ac-h-07", "fail", f"no {log_path.as_posix()}")
     with log_path.open(encoding="utf-8", newline="") as handle:
         rows = [r for r in csv.DictReader(handle) if r["strategy_family"] == "contamination"]
     if not rows:
