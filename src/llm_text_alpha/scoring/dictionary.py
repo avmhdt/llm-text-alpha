@@ -64,6 +64,14 @@ def load_dictionary(path: Path) -> LMDictionary:
     return LMDictionary(words=words, model_id=f"lm-{path.stem}@{digest}")
 
 
+def english_words(path: Path) -> frozenset[str]:
+    """Every word in the Master Dictionary, lower-cased (the masker's English word list)."""
+    if not path.exists():
+        raise DictionaryError(f"{path} does not exist; place the Master Dictionary CSV there")
+    frame = pl.read_csv(path, infer_schema_length=0, columns=["Word"])
+    return frozenset(frame["Word"].drop_nulls().str.to_lowercase().to_list())
+
+
 def tokens(text: str) -> list[str]:
     """Alphabetic tokens, upper-cased; apostrophes inside words are kept."""
     return [match.group(0).upper() for match in _WORD.finditer(text)]

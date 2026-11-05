@@ -70,7 +70,14 @@ _CAPS_BEFORE_PLACE = r"(?:\b[A-Z][A-Z.'\-]+\s+){1,3}(?=\[PLACE\])"
 _CITY_BEFORE_PLACE = r"\b(?:[A-Z][A-Za-z.'\-]+\s+){0,2}[A-Z][A-Za-z.'\-]+(?=,\s*\[PLACE\])"
 _CAPS_DATELINE = (
     r"\b[A-Z]{3,}(?:\s+[A-Z]{3,}){0,2}"
-    r"(?=,\s*(?:\[DATE\]|\[PLACE\]|[A-Z]\.[A-Z]\.|[A-Z][a-z]{1,4}\.\s))"
+    r"(?=(?:,\s*[A-Z][A-Za-z.]{1,12})?\s*--\s*\("
+    r"|,\s*\[(?:DATE|PLACE|COMPANY)\]"
+    r"|,\s*[A-Z]\.[A-Z]\."
+    r"|,\s*[A-Z][a-z]{1,4}\.(?:\s|--|,))"
+)
+_TOWN_BEFORE_STATE = (
+    r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}"
+    r"(?=,\s*\[COMPANY\]\s*(?:[\u2013\u2014-]|--|\(|,\s*\[DATE\]))"
 )
 _PLACEHOLDER = re.compile(r"\[[A-Z]+\]")
 
@@ -155,16 +162,38 @@ def name_variants(
     return sorted(out, key=lambda v: (-len(v), v))
 
 
-def _name_regex(variant: str, min_chars: int) -> re.Pattern[str] | None:
+def _word(word: str) -> str:
+    """A name word as a pattern; a final ``s`` may follow an apostrophe (MOODYS, Moody's)."""
+    if len(word) > 3 and word[-1] in "sS" and word[-2].isalpha():
+        return re.escape(word[:-1]) + "['\u2019]?" + re.escape(word[-1])
+    return re.escape(word)
+
+
+def _name_regex(
+    variant: str, min_chars: int, english: frozenset[str] | None = None
+) -> re.Pattern[str] | None:
+    """Pattern for one name variant.
+
+    Multi-word variants match in any case. A one-word variant that is not an English word
+    (``english``) matches in any case too (lululemon, eBay, nVent). An English one-word
+    variant must start with a capital letter or a digit (Target, McKesson, but not
+    "target"). A two-character variant is kept only when it holds a digit (3M).
+    """
     words = variant.split(" ")
-    body = r"[\s,.\-]*".join(re.escape(w) for w in words)
+    body = r"[\s,.\-]*".join(_word(w) for w in words)
     tail = r"(?:[\s,]+(?:Inc|Corp|Corporation|Co|Company|Ltd|LLC|L\.?P|PLC|N\.?V|S\.?A)\b\.?)?"
     if len(words) == 1:
-        if len(variant) < min_chars or not re.search(r"[A-Za-z]", variant):
+        has_digit = any(c.isdigit() for c in variant)
+        too_short = len(variant) < min_chars and not (has_digit and len(variant) >= 2)
+        if too_short or not re.search(r"[A-Za-z]", variant):
             return None
-        title, upper = variant[:1].upper() + variant[1:].lower(), variant.upper()
-        alts = "|".join(sorted({re.escape(title), re.escape(upper), re.escape(variant)}))
-        return re.compile(rf"(?<![\w\[])(?:The\s+)?(?:{alts}){tail}(?![\w\]])")
+        if english is not None and variant.lower() not in english:
+            return re.compile(
+                rf"(?<![\w\[])(?:The\s+)?{_word(variant)}{tail}(?![\w\]])", re.IGNORECASE
+            )
+        return re.compile(
+            rf"(?<![\w\[])(?:The\s+)?(?=[A-Z0-9])(?i:{_word(variant)}){tail}(?![\w\]])"
+        )
     return re.compile(rf"(?<![\w\[])(?:the\s+)?{body}{tail}(?![\w\]])", re.IGNORECASE)
 
 
@@ -177,17 +206,23 @@ class MaskResult:
     residual_name_hits: int = 0
     residual_year_hits: int = 0
     passes: int = 0
+    residual_word_hits: int = 0
 
 
 class Masker:
     """Masks one company's text; ``nlp`` is a loaded spaCy pipeline or ``None`` (rules only)."""
 
-    def __init__(self, config: MaskConfig, nlp: Any | None = None) -> None:
+    def __init__(
+        self, config: MaskConfig, nlp: Any | None = None, english: frozenset[str] | None = None
+    ) -> None:
         self.config = config
         self.nlp = nlp
+        self.english = english
         exchanges = "|".join(re.escape(e) for e in sorted(config.exchanges, key=len, reverse=True))
         self._exchange = re.compile(
-            rf"(\b(?:{exchanges})\b[\w\s]{{0,30}}?:\s*)([A-Z][A-Z0-9]{{0,5}}(?:[.\-][A-Z])?)\b"
+            rf"(\b(?:{exchanges})\b[\w\s]{{0,30}}?:\s*)"
+            r"([A-Z][A-Z0-9]{0,5}(?:[.\-][A-Z])?"
+            r"(?:\s*(?:,|and|;)\s*[A-Z][A-Z0-9]{1,5}(?:[.\-][A-Z])?)*)\b"
         )
         self._dates = [re.compile(p, re.IGNORECASE) for p in _DATE_PATTERNS]
         self._periods = [re.compile(p, re.IGNORECASE) for p in _PERIOD_PATTERNS]
@@ -199,6 +234,7 @@ class Masker:
         self._caps_before_place = re.compile(_CAPS_BEFORE_PLACE)
         self._city_before_place = re.compile(_CITY_BEFORE_PLACE)
         self._caps_dateline = re.compile(_CAPS_DATELINE)
+        self._town_before_state = re.compile(_TOWN_BEFORE_STATE)
 
     def variants(self, names: Sequence[str]) -> list[str]:
         """Name variants of the filer, the brand word included."""
@@ -238,7 +274,7 @@ class Masker:
         text = self._sub(self._phone, "phone", text, counts)
         counts["ticker"] = counts.get("ticker", 0) + n_exchange
         for variant in self.variants(names):
-            pattern = _name_regex(variant, self.config.min_short_name_chars)
+            pattern = _name_regex(variant, self.config.min_short_name_chars, self.english)
             if pattern is not None:
                 text = self._sub(pattern, "company", text, counts)
         if ticker and len(ticker) >= 2:
@@ -255,6 +291,7 @@ class Masker:
         text = self._sub(self._address, "place", text, counts)
         text = self._sub(self._caps_dateline, "place", text, counts)
         text = self._sub(self._city_before_place, "place", text, counts)
+        text = self._sub(self._town_before_state, "place", text, counts)
         merged, n = self._caps_before_place.subn("", text)
         counts["place"] = counts.get("place", 0) + n
         return merged
@@ -285,17 +322,41 @@ class Masker:
         pieces.append(text[last:])
         return "".join(pieces)
 
-    def audit(self, text: str, names: Sequence[str], ticker: str | None) -> tuple[int, int]:
-        """Residual exact name/ticker hits and residual years in masked ``text``."""
+    def audit_all(
+        self, text: str, names: Sequence[str], ticker: str | None
+    ) -> tuple[int, int, int]:
+        """Residual name/ticker hits, lower-case English-word hits, and residual years.
+
+        Every name variant of three or more characters (two with a digit) is searched in any
+        case, with or without an apostrophe before a final s. A match that is a lower-case
+        English word equal to a one-word short name ("waste" for WASTE MANAGEMENT) is counted
+        apart, as a word hit: it does not name the company. Everything else is a name hit.
+        """
         hits = 0
+        words = 0
         for variant in self.variants(names):
-            if len(variant) < self.config.min_short_name_chars:
+            if len(variant) < 2 or (
+                len(variant) < self.config.min_short_name_chars
+                and not any(c.isdigit() for c in variant)
+            ):
                 continue
-            flags = re.IGNORECASE if " " in variant else 0
-            hits += len(re.findall(rf"(?<![\w\[]){re.escape(variant)}(?![\w\]])", text, flags))
+            body = r"[\s,.\-]*".join(_word(w) for w in variant.split(" "))
+            english_word = " " not in variant and (
+                self.english is None or variant.lower() in self.english
+            )
+            for found in re.finditer(rf"(?<![\w\[]){body}(?![\w\]])", text, re.IGNORECASE):
+                if english_word and found.group(0)[0].islower():
+                    words += 1
+                else:
+                    hits += 1
         if ticker and len(ticker) >= 2:
             hits += len(re.findall(rf"(?<![\w\[]){re.escape(ticker)}(?![\w\]])", text))
-        return hits, len(self._year.findall(text))
+        return hits, words, len(self._year.findall(text))
+
+    def audit(self, text: str, names: Sequence[str], ticker: str | None) -> tuple[int, int]:
+        """Residual name/ticker hits and residual years (see ``audit_all``)."""
+        hits, _, years = self.audit_all(text, names, ticker)
+        return hits, years
 
     def mask(
         self,
@@ -316,8 +377,8 @@ class Masker:
             if new == current:
                 break
             current = new
-        residual, years = self.audit(current, names, ticker)
-        return MaskResult(current, counts, residual, years, passes)
+        residual, words, years = self.audit_all(current, names, ticker)
+        return MaskResult(current, counts, residual, years, passes, words)
 
 
 def leftover_placeholders(text: str) -> int:
@@ -372,6 +433,6 @@ def mask_many(
         todo = still
     results = []
     for i, text in enumerate(current):
-        residual, years = masker.audit(text, entities[i].names, entities[i].ticker)
-        results.append(MaskResult(text, counts[i], residual, years, passes[i]))
+        residual, words, years = masker.audit_all(text, entities[i].names, entities[i].ticker)
+        results.append(MaskResult(text, counts[i], residual, years, passes[i], words))
     return results

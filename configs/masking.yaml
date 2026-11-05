@@ -1,5 +1,5 @@
-# Entity and date masking (FR-14, AC-W-09). mask_version is m1 plus the sha8 of this file.
-version: m1
+# Entity and date masking (FR-14, AC-W-09). mask_version is m2 plus the sha8 of this file.
+version: m2
 placeholders:
   company: "[COMPANY]"
   ticker: "[TICKER]"

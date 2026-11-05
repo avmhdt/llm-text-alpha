@@ -75,7 +75,7 @@ budget:
   max_price_table_age_days: 45
 masking:
   config: configs/masking.yaml
-  version: m1
+  version: m2
 evaluation:
   ar_model: ff5umd
   estimation_window: [-250, -30]

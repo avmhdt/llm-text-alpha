@@ -19,6 +19,7 @@ from llm_text_alpha.corpus.mask import (
 CONFIG = Path(__file__).parents[2] / "configs" / "masking.yaml"
 RULES = Masker(MaskConfig.load(CONFIG, ner=False))
 SUFFIXES = RULES.config.legal_suffixes
+DASH = chr(0x2013)
 
 
 @pytest.fixture(scope="module")
@@ -29,7 +30,7 @@ def full() -> Masker:
 
 
 def test_version_carries_the_file_hash() -> None:
-    assert RULES.config.version.startswith("m1@") and len(RULES.config.version) == 11
+    assert RULES.config.version.startswith("m2@") and len(RULES.config.version) == 11
 
 
 def test_name_variants() -> None:
@@ -138,3 +139,67 @@ def test_mask_many_matches_mask(full: Masker) -> None:
     assert [m.text for m in many] == [s.text for s in single]
     rules_only = mask_many(RULES, texts, ents)
     assert "Texas" in rules_only[0].text and "[PERIOD]" in rules_only[0].text
+
+
+@pytest.mark.parametrize(
+    ("text", "names", "ticker", "leaks"),
+    [
+        (
+            "Moody's Corporation (NYSE:MCO) and MOODY'S said.",
+            ["MOODYS CORP /DE/"],
+            "MCO",
+            ["Moody", "MOODY"],
+        ),
+        ("McKESSON REPORTS. McKesson Corporation said.", ["MCKESSON CORP"], "MCK", ["McK", "MCK"]),
+        ("3M Delivers Strong Results. 3M (NYSE: MMM) said.", ["3M CO"], "MMM", ["3M", "MMM"]),
+        (
+            "RBC Bearings (NYSE: ROLL, RBCP) said.",
+            ["RBC BEARINGS INC"],
+            "ROLL",
+            ["RBCP", "ROLL", "Bearings"],
+        ),
+        ("CISCO REPORTS RESULTS; Cisco grew.", ["CISCO SYSTEMS, INC."], "CSCO", ["CISCO", "Cisco"]),
+        (
+            "ELGIN, Ill.--(BUSINESS WIRE)--Today. PHILADELPHIA--(BUSINESS WIRE)--Today.",
+            ["X CORP"],
+            None,
+            ["ELGIN", "PHILADELPHIA"],
+        ),
+        ("Riverwoods, [COMPANY], [DATE] - results.", ["X CORP"], None, ["Riverwoods"]),
+        ("Visit 26125 N. Riverwoods Blvd., Suite 500.", ["X CORP"], None, ["Riverwoods"]),
+    ],
+)
+def test_review_leaks_are_masked(
+    text: str, names: list[str], ticker: str | None, leaks: list[str]
+) -> None:
+    out = RULES.mask(text, names, ticker).text
+    for leak in leaks:
+        assert leak not in out, (leak, out)
+
+
+def test_generic_first_words_and_financial_terms_survive() -> None:
+    out = RULES.mask(
+        f"General Electric said American demand rose; EBITDA {DASH} up.",
+        ["GENERAL MILLS INC"],
+        None,
+    )
+    assert "American" in out.text and f"EBITDA {DASH}" in out.text
+
+
+def test_audit_is_stricter_than_masking() -> None:
+    r = RULES.mask("Target said the target price rose.", ["TARGET CORP"], None)
+    assert (
+        r.text.startswith("[COMPANY]") and r.residual_name_hits == 0 and r.residual_word_hits == 1
+    )
+
+
+def test_lowercase_brands_are_masked_with_an_english_word_list() -> None:
+    english = frozenset({"waste", "target", "management"})
+    masker = Masker(MaskConfig.load(CONFIG, ner=False), english=english)
+    r = masker.mask(
+        "lululemon athletica said lululemon grew; waste fell.", ["LULULEMON ATHLETICA INC."], None
+    )
+    assert "lululemon" not in r.text and r.residual_name_hits == 0
+    w = masker.mask("Waste Management said waste volumes rose.", ["WASTE MANAGEMENT INC"], None)
+    assert w.text.startswith("[COMPANY]") and "waste volumes" in w.text
+    assert w.residual_name_hits == 0 and w.residual_word_hits == 1

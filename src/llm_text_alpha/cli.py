@@ -278,7 +278,10 @@ def corpus_mask(
         Entity(tuple([r["company_name"] or "", *(r["former_names"] or [])]), r["ticker"], r["cik"])
         for r in docs.iter_rows(named=True)
     ]
-    masker = Masker(mcfg, Masker.load_nlp(mcfg.ner_model))
+    from llm_text_alpha.scoring.dictionary import english_words
+
+    english = english_words(settings.data_path(cfg["scorers"]["lm"]["dictionary_file"]))
+    masker = Masker(mcfg, Masker.load_nlp(mcfg.ner_model), english)
     results = mask_many(masker, windows, entities, n_process=processes)
     kinds = list(mcfg.placeholders)
     table = pl.DataFrame(
@@ -289,11 +292,16 @@ def corpus_mask(
             **{f"n_{k}": [r.counts.get(k, 0) for r in results] for k in kinds},
             "residual_name_hits": [r.residual_name_hits for r in results],
             "residual_year_hits": [r.residual_year_hits for r in results],
+            "residual_word_hits": [r.residual_word_hits for r in results],
             "passes": [r.passes for r in results],
             "raw_chars": [len(w) for w in windows],
         },
         schema_overrides={f"n_{k}": pl.Int32 for k in kinds}
-        | {"residual_name_hits": pl.Int32, "residual_year_hits": pl.Int32},
+        | {
+            "residual_name_hits": pl.Int32,
+            "residual_year_hits": pl.Int32,
+            "residual_word_hits": pl.Int32,
+        },
     )
     folder = _masked_folder(settings, mcfg.version)
     write_parquet_atomic(table, folder / "part-00000.parquet")
@@ -327,6 +335,12 @@ def corpus_audit_mask(
         {"metric": "documents", "value": float(n)},
         {"metric": "share_with_residual_name_or_ticker", "value": share_names},
         {"metric": "share_with_residual_year", "value": share_years},
+        {
+            "metric": "share_with_lowercase_word_equal_to_short_name",
+            "value": mean(table["residual_word_hits"] > 0)
+            if "residual_word_hits" in table.columns
+            else 0.0,
+        },
         *[
             {"metric": f"mean_{c}", "value": mean(table[c])}
             for c in table.columns
