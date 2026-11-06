@@ -114,6 +114,10 @@ def write_synthetic_filings(raw: Path, efp_root: Path) -> None:
 
 def invoke(*args: str) -> str:
     result = runner.invoke(cli.app, list(args))
+    if result.exception is not None and not isinstance(result.exception, SystemExit):
+        import traceback
+
+        traceback.print_exception(result.exception)
     assert result.exit_code == 0, result.output
     return result.output
 
@@ -156,11 +160,39 @@ def test_pipeline_end_to_end(workdir: Path) -> None:
     assert "open holds included" in invoke("llm", "spend")
     config = workdir / "configs" / "default.yaml"
     text = config.read_text("utf-8")
-    text = text.replace(
-        "llm: {model: claude-haiku-5-5, samples: [item202_main, item202_post_h55]}",
-        "llm: {model: fake-v1, samples: [item202_main]}",
-    ).replace("min_events: 50}", "min_events: 5}")
+    text = (
+        text.replace(
+            "llm: {model: claude-haiku-5-5, samples: [item202_main, item202_post_h55], "
+            "masked: [false, true]}",
+            "llm: {model: fake-v1, samples: [item202_main], masked: [false, true]}",
+        )
+        .replace("min_events: 50}", "min_events: 5}")
+        .replace(
+            "models: {claude-haiku-5-5: llm, claude-haiku-4-5: llm_h45, "
+            "llama-3.1-8b-instruct-q4_k_m: llm_llama}",
+            "models: {fake-v1: llm}",
+        )
+        .replace(
+            "    sample: item202_contam\n    reidentify_n: 300\n    outcome_recall_n: 300",
+            "    sample: item202_main\n    reidentify_n: 20\n    outcome_recall_n: 20",
+        )
+        .replace("bootstrap_reps: 500", "bootstrap_reps: 20")
+    )
     config.write_text(text, "utf-8")
+    models = workdir / "configs" / "models.yaml"
+    models.write_text(
+        models.read_text("utf-8").replace(
+            "provider: fake\n  training_data_cutoff: null",
+            "provider: fake\n  training_data_cutoff: 2016-06",
+        ),
+        "utf-8",
+    )
+    assert "documents masked" in invoke(
+        "corpus", "mask", "--samples", "item202_main", "--processes", "1"
+    )
+    assert "residual names" in invoke("corpus", "audit-mask", "--review", "5")
+    masked_run = invoke("score", "llm", *llm, "--masked", "--run-id", "llm-masked")
+    assert "requests" in masked_run
     out = invoke("signals", "build", "--scorers", "lm,finbert,sue,llm")
     assert "finbert" in out and "lm" in out and "llm" in out
     assert "kept" in invoke("eval", "abnormal")
@@ -171,6 +203,11 @@ def test_pipeline_end_to_end(workdir: Path) -> None:
     assert "portfolios written" in invoke("eval", "portfolio", "--scorers", "lm,llm,sue")
     assert "rows written" in invoke("eval", "ablation")
     assert "trials logged" in invoke("eval", "trials")
+    assert "recall probes" in invoke("score", "probes", "--provider", "fake", "--model", "fake-v1")
+    assert "models written" in invoke("eval", "contamination", "--models", "fake-v1")
+    assert "releases accepted" in invoke("eval", "latency", "--fetch-sample", "0")
+    assert (workdir / "reports" / "tables" / "contamination_cells.md").exists()
+    assert (workdir / "reports" / "tables" / "mask_audit.md").exists()
     signals = pl.read_parquet(workdir / "data" / "processed" / "signals" / "signals.parquet")
     assert (signals["entry_ts_utc"] > signals["event_ts_utc"]).all()
     assert signals.filter(pl.col("quintile") > 0).height > 0
@@ -188,7 +225,9 @@ def test_pipeline_end_to_end(workdir: Path) -> None:
     }
     assert all(row["x_run_kind"] == "analysis" and row["n_obs"] == "0" for row in analysis)
     later = {row["strategy_family"] for row in rows[trial_rows_before_m5:]}
-    assert later <= {"portfolio", "ablation"}
+    assert later <= {"portfolio", "ablation", "contamination", "latency"}
+    contamination = [r for r in rows if r["strategy_family"] == "contamination"]
+    assert contamination and "preregistration_sha" in contamination[0]["params_json"]
     for row in rows:
         if row["strategy_family"] == "portfolio":
             assert int(row["n_obs"]) > 0

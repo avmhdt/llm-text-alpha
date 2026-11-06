@@ -190,3 +190,16 @@ def test_make_provider_names(tmp_path: Path) -> None:
     assert local.name == "local"
     with pytest.raises(ValueError, match="unknown provider"):
         llm_run.make_provider("openai", settings, s.registry(), cache, "r", prices)
+
+
+def test_cutoff_windows_and_allocated_draws() -> None:
+    docs = corpus(800)
+    windowed = llm_run.cutoff_windows(docs, ["2018-01-01", "2020-01-01"])
+    assert set(windowed["cutoff_window"].unique().to_list()) == {"w0", "w1", "w2"}
+    equal = llm_run.draw_sample(windowed, 300, ["year", "cutoff_window"], 3, "cutoff_window")
+    assert equal.group_by("cutoff_window").len()["len"].to_list() == [100, 100, 100]
+    picked = llm_run.draw_sample(
+        windowed, 0, ["year", "cutoff_window"], 3, "cutoff_window", {"w0": 50, "w1": 20, "w2": 10}
+    )
+    counts = dict(picked.group_by("cutoff_window").len().iter_rows())
+    assert counts == {"w0": 50, "w1": 20, "w2": 10}

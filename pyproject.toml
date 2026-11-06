@@ -30,6 +30,8 @@ dependencies = [
     "torch>=2.4",
     "transformers>=4.44",
     "anthropic>=2.4.0",
+    "spacy==3.8.16",
+    "en-core-web-sm",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +55,7 @@ allow-direct-references = true
 eqpit = { git = "https://github.com/avmhdt/equity-factor-pipeline", subdirectory = "packages/eqpit", rev = "2ee3583274ed544ac009fc894283ac69ed422a2f" }
 overfitlab = { git = "https://github.com/avmhdt/backtest-overfitting-lab", rev = "ab5bf0c" }
 torch = [{ index = "pytorch-cpu" }]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

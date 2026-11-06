@@ -1,0 +1,26 @@
+{
+  "cache_hits": 0,
+  "cache_read_tokens": 0,
+  "ended_at": "2026-11-05T01:29:08.897418+00:00",
+  "estimate": {
+    "already_cached": 0,
+    "bypass_cache": false,
+    "documents": 50,
+    "mode": "sync",
+    "model": "llama-3.1-8b-instruct-q4_k_m",
+    "prompt_version": "score_v1@190b8b18",
+    "provider": "local",
+    "sample": "item202_contam",
+    "worst_case_input_tokens": 0,
+    "worst_case_usd": 0.0
+  },
+  "input_tokens": 114567,
+  "output_tokens": 2629,
+  "refusals": 0,
+  "requests": 50,
+  "retried": 0,
+  "schema_valid": 50,
+  "started_at": "2026-11-05T01:02:18.870458+00:00",
+  "status": "done",
+  "usd": 0.0
+}

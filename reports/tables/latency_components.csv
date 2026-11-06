@@ -1,0 +1,5 @@
+# command=lta eval latency | run_id=f5c27e5c-6a54-4691-824d-858b2503d787 | git_sha=7fefad323e988cd2b058591f8c52259ca13a5329 | provider=licensed
+component,measured,n,p50_ms,p95_ms,p99_ms
+EDGAR dissemination (acceptance to public),false,0,,,
+EDGAR fetch and parse (20 live filings),true,20,373.58573550591245,426.7078503791709,478.777264492819
+gate and order decision,true,1000,0.0014230026863515377,0.001518047065474093,0.002289566909894345

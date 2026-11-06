@@ -1,0 +1,7 @@
+fetch_sample: 20
+scorers:
+- lm
+- finbert
+- llm
+- llm_h45
+- llm_llama

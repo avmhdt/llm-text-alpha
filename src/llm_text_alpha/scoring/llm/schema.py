@@ -51,3 +51,62 @@ LLM_SCORE_SCHEMA: dict[str, Any] = {
     "required": ["score", "label", "surprise", "guidance", "materiality", "confidence"],
     "additionalProperties": False,
 }
+
+
+class ReidAnswer(BaseModel):
+    """Re-identification probe (FR-20): the model's guess of the company and period."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    company: str = Field(max_length=200)
+    ticker: str | None = Field(default=None, max_length=12)
+    period_year: int | None = Field(default=None, ge=1980, le=2035)
+    period_quarter: Literal[1, 2, 3, 4] | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+REID_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "company": {"type": "string", "description": "Best guess of the company's name."},
+        "ticker": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "period_year": {
+            "anyOf": [{"type": "integer"}, {"type": "null"}],
+            "description": "Calendar year in which the reported quarter ended.",
+        },
+        "period_quarter": {
+            "anyOf": [{"type": "integer", "enum": [1, 2, 3, 4]}, {"type": "null"}],
+            "description": "Calendar quarter (1-4) in which the reported quarter ended.",
+        },
+        "confidence": {"type": "number", "description": "0 to 1."},
+    },
+    "required": ["company", "ticker", "period_year", "period_quarter", "confidence"],
+    "additionalProperties": False,
+}
+
+
+class RecallAnswer(BaseModel):
+    """Outcome-recall probe (FR-20): the remembered direction of the stock's move."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["up", "down"]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+RECALL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "direction": {"type": "string", "enum": ["up", "down"]},
+        "confidence": {"type": "number", "description": "0 to 1."},
+    },
+    "required": ["direction", "confidence"],
+    "additionalProperties": False,
+}
+
+ANSWERS: dict[str, type[BaseModel]] = {
+    "score": LLMScore,
+    "reid": ReidAnswer,
+    "recall": RecallAnswer,
+}
+"""Pydantic model that validates each kind of answer, by ``ScoreRequest.answer``."""

@@ -1,0 +1,109 @@
+{
+  "cells": [
+    {
+      "ic": 0.002531122627141243,
+      "ic_hi95": 0.05420038157153494,
+      "ic_lo95": -0.04915165467827625,
+      "model_id": "claude-haiku-4-5",
+      "n": 1439,
+      "scorer": "llm_h45",
+      "spread": 0.000516670751916896,
+      "spread_hi95": 0.011687523966673928,
+      "spread_lo95": -0.010654182462840138,
+      "t_spread": 0.09065329695849396,
+      "text": "raw",
+      "underpowered": false,
+      "window": "pre"
+    },
+    {
+      "ic": 0.006014974267701603,
+      "ic_hi95": 0.05781759179478844,
+      "ic_lo95": -0.0458199470607297,
+      "model_id": "claude-haiku-4-5",
+      "n": 1431,
+      "scorer": "llm_h45",
+      "spread": 0.002152438455806732,
+      "spread_hi95": 0.018403899272602314,
+      "spread_lo95": -0.01409902236098885,
+      "t_spread": 0.25959385565026655,
+      "text": "raw",
+      "underpowered": false,
+      "window": "post"
+    },
+    {
+      "ic": 0.01996412743705371,
+      "ic_hi95": 0.07156664235945376,
+      "ic_lo95": -0.031744971308740294,
+      "model_id": "claude-haiku-4-5",
+      "n": 1439,
+      "scorer": "llm_h45",
+      "spread": 0.007018496471082486,
+      "spread_hi95": 0.017876307552935296,
+      "spread_lo95": -0.003839314610770325,
+      "t_spread": 1.2669453336053313,
+      "text": "masked",
+      "underpowered": false,
+      "window": "pre"
+    },
+    {
+      "ic": 0.00440373347315243,
+      "ic_hi95": 0.05621154501734684,
+      "ic_lo95": -0.04742772899733246,
+      "model_id": "claude-haiku-4-5",
+      "n": 1431,
+      "scorer": "llm_h45",
+      "spread": 0.0009534281388217753,
+      "spread_hi95": 0.015146040681203544,
+      "spread_lo95": -0.013239184403559992,
+      "t_spread": 0.1316684399373504,
+      "text": "masked",
+      "underpowered": false,
+      "window": "post"
+    }
+  ],
+  "did": [
+    {
+      "baseline": "lm",
+      "contamination_found": false,
+      "did": 0.0022687516910708787,
+      "did_hi95": 0.027216120783563884,
+      "did_lo95": -0.022711922010753564,
+      "n_post": 1431,
+      "n_pre": 1437,
+      "scorer": "llm_h45"
+    },
+    {
+      "baseline": "finbert",
+      "contamination_found": false,
+      "did": -0.014581771765519254,
+      "did_hi95": 0.007588247889550078,
+      "did_lo95": -0.03766016583159959,
+      "n_post": 1431,
+      "n_pre": 1437,
+      "scorer": "llm_h45"
+    }
+  ],
+  "summary": {
+    "did_vs_finbert": -0.014581771765519254,
+    "did_vs_finbert_hi95": 0.007588247889550078,
+    "did_vs_finbert_lo95": -0.03766016583159959,
+    "did_vs_lm": 0.0022687516910708787,
+    "did_vs_lm_hi95": 0.027216120783563884,
+    "did_vs_lm_lo95": -0.022711922010753564,
+    "model_id": "claude-haiku-4-5",
+    "post_cutoff_start": "2025-08-01",
+    "recall_direction_correct_all": 0.4791666666666667,
+    "recall_direction_correct_post": 0.4642857142857143,
+    "recall_direction_correct_pre": 0.49324324324324326,
+    "reid_company_correct_all": 0.5366666666666666,
+    "reid_company_correct_post": 0.5133333333333333,
+    "reid_company_correct_pre": 0.56,
+    "reid_quarter_correct_all": 0.10104529616724739,
+    "reid_quarter_correct_post": 0.006993006993006993,
+    "reid_quarter_correct_pre": 0.19444444444444445,
+    "scorer": "llm_h45",
+    "share_cutoff": -3.16597697435163,
+    "share_masking": -12.584079309779426,
+    "share_total": -0.8453301939087304
+  }
+}

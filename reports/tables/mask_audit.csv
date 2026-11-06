@@ -1,0 +1,17 @@
+# command=lta corpus audit-mask (m2@f47398b1) | run_id=beaafe23-10df-4e58-a07f-fce231492581 | git_sha=b34565c166da8746ace12194d30e6e56de569d31 | provider=licensed
+metric,value
+documents,21782.0
+share_with_residual_name_or_ticker,0.0
+share_with_residual_year,0.0
+share_with_lowercase_word_equal_to_short_name,0.019786980075291526
+mean_n_company,22.351345147369386
+mean_n_ticker,1.790836470480213
+mean_n_cik,0.0
+mean_n_person,4.313102561748233
+mean_n_place,7.749242493802222
+mean_n_date,8.869341658249931
+mean_n_year,5.480809842989625
+mean_n_period,19.20838306858874
+mean_n_url,1.2800018363786614
+mean_n_phone,1.039528050684051
+mean_passes,2.3795335598200347

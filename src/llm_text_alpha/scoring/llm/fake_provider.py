@@ -33,6 +33,18 @@ class FakeProvider:
 
     def _respond(self, request: ScoreRequest) -> str:
         digest = hashlib.sha256(f"{self.seed}|{request.user_text}".encode()).digest()
+        if request.answer == "reid":
+            return json.dumps(
+                {
+                    "company": "unknown",
+                    "ticker": None,
+                    "period_year": None,
+                    "period_quarter": None,
+                    "confidence": 0.0,
+                }
+            )
+        if request.answer == "recall":
+            return json.dumps({"direction": "up" if digest[0] % 2 else "down", "confidence": 0.5})
         score = round(digest[0] / 127.5 - 1.0, 4)
         label = "positive" if score > 0.2 else "negative" if score < -0.2 else "neutral"
         return json.dumps(
@@ -54,7 +66,7 @@ class FakeProvider:
             hit = cached is not None
             if cached is None:
                 raw = self._respond(request)
-                payload, valid = parse_payload(raw)
+                payload, valid = parse_payload(raw, request.answer)
                 cached = CachedResponse(
                     cache_key=key,
                     doc_id=request.doc_id,
@@ -71,7 +83,7 @@ class FakeProvider:
                     latency_ms=0.0,
                 )
                 self.cache.put(key, cached)
-            payload, valid = parse_payload(cached.raw_text)
+            payload, valid = parse_payload(cached.raw_text, request.answer)
             results.append(
                 ScoreResult(
                     doc_id=request.doc_id,

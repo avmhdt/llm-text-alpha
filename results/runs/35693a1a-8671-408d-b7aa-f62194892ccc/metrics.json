@@ -1,0 +1,82 @@
+{
+  "decision": {
+    "n": 1000,
+    "p50_ms": 0.0014230026863515377,
+    "p95_ms": 0.001518047065474093,
+    "p99_ms": 0.002289566909894345
+  },
+  "fetch": {
+    "n": 20,
+    "p50_ms": 373.58573550591245,
+    "p95_ms": 426.7078503791709,
+    "p99_ms": 478.777264492819
+  },
+  "in_session_share": 0.04018232819074334,
+  "scoring": [
+    {
+      "batch_turnaround_max_s": null,
+      "model_id": "lm-LM_MasterDictionary@e2d13286",
+      "n": 44464,
+      "p50_ms": 1.4703909982927144,
+      "p95_ms": 4.4484265468781805,
+      "p99_ms": 7.532589079637561,
+      "scorer": "lm",
+      "traded_share": 0.3958239073387024,
+      "usd_per_doc_batch": 0.0,
+      "usd_per_doc_sync": 0.0,
+      "usd_per_traded_signal": 0.0
+    },
+    {
+      "batch_turnaround_max_s": null,
+      "model_id": "ProsusAI/finbert@0bc2ac10dda6929bcb1f77ccc43c7ec5c424f031",
+      "n": 44464,
+      "p50_ms": 1075.2966345025925,
+      "p95_ms": 2332.3405220500713,
+      "p99_ms": 3495.6280086384527,
+      "scorer": "finbert",
+      "traded_share": 0.39903628630893134,
+      "usd_per_doc_batch": 0.0,
+      "usd_per_doc_sync": 0.0,
+      "usd_per_traded_signal": 0.0
+    },
+    {
+      "batch_turnaround_max_s": 659.221526,
+      "model_id": "claude-haiku-5-5",
+      "n": 200,
+      "p50_ms": 1303.2698169990908,
+      "p95_ms": 1729.9698822913335,
+      "p99_ms": 2283.748040255158,
+      "scorer": "llm",
+      "traded_share": 0.36968007044320517,
+      "usd_per_doc_batch": 0.0001474382126404563,
+      "usd_per_doc_sync": 0.000294247075,
+      "usd_per_traded_signal": 0.0007959506030369195
+    },
+    {
+      "batch_turnaround_max_s": 354.300548,
+      "model_id": "claude-haiku-4-5",
+      "n": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null,
+      "scorer": "llm_h45",
+      "traded_share": 0.364314789687924,
+      "usd_per_doc_batch": 0.001589413123228281,
+      "usd_per_doc_sync": 0.003178826246456562,
+      "usd_per_traded_signal": 0.008725493272396596
+    },
+    {
+      "batch_turnaround_max_s": null,
+      "model_id": "llama-3.1-8b-instruct-q4_k_m",
+      "n": 2426,
+      "p50_ms": 32589.07732651278,
+      "p95_ms": 46691.16002074588,
+      "p99_ms": 57595.190514737624,
+      "scorer": "llm_llama",
+      "traded_share": 0.22949389179755672,
+      "usd_per_doc_batch": null,
+      "usd_per_doc_sync": 0.0,
+      "usd_per_traded_signal": 0.0
+    }
+  ]
+}

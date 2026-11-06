@@ -1,0 +1,46 @@
+# Entity and date masking (FR-14, AC-W-09). mask_version is m2 plus the sha8 of this file.
+version: m2
+placeholders:
+  company: "[COMPANY]"
+  ticker: "[TICKER]"
+  cik: "[CIK]"
+  person: "[PERSON]"
+  place: "[PLACE]"
+  date: "[DATE]"
+  year: "[YEAR]"
+  period: "[PERIOD]"
+  url: "[URL]"
+  phone: "[PHONE]"
+# Legal-form words stripped from EDGAR conformed names to build the short name variant.
+legal_suffixes: [inc, incorporated, corp, corporation, co, company, cos, companies, ltd, limited,
+  llc, lp, llp, plc, holdings, holding, group, trust, nv, sa, ag, se, the, de, bancorp, bancshares]
+# A one-word short name ("Apple") is matched only in Title or UPPER case, and only when it has
+# at least this many letters; multi-word names match in any case.
+min_short_name_chars: 3
+exchanges: [NYSE American, NYSE Arca, NYSE MKT, NYSE, Nasdaq Global Select Market, Nasdaq Global Market,
+  Nasdaq Capital Market, NASDAQ, Nasdaq, AMEX, OTCQX, OTCQB, OTC, TSX, LSE, CBOE, Cboe]
+# The first word of a multi-word name ("CISCO" of CISCO SYSTEMS INC) is also masked, in Title
+# or UPPER case, unless it is one of these generic words.
+first_word_stoplist: [american, general, first, united, national, international, global, standard,
+  southern, northern, western, eastern, central, pacific, atlantic, new, great, royal, capital,
+  community, energy, financial, systems, technologies, health, healthcare, home, life, public,
+  universal, advanced, applied, allied, consolidated, federal, washington, texas, california,
+  florida, carolina, ohio, delaware, nevada, us, usa, north, south, west, east, world, digital,
+  data, medical, mid, old, park, regional, republic, state, the, banc, bank, insurance, mutual,
+  liberty, enterprise, enterprises, industrial, industries, power, oil, gas, steel, motor, motors,
+  air, airlines, resources, realty, properties, trust, investment, investors, partners, services,
+  solutions, products, brands, foods, entertainment, media, communications, network, networks,
+  software, semiconductor, pharmaceuticals, therapeutics, biosciences, sciences, labs, holdings]
+# Financial terms spaCy tends to tag as organizations or people; never masked by NER.
+ner_keep: [EPS, EBITDA, EBIT, EBITDAR, GAAP, Non-GAAP, non-GAAP, ROE, ROA, ROIC, ROTCE, FFO, AFFO,
+  NOI, ARR, NIM, OCF, FCF, SG&A, R&D, CEO, CFO, COO, CAGR, YoY, COVID-19, COVID, Adjusted EPS,
+  Adjusted EBITDA, Core EPS, Diluted EPS, Net Income, Net Revenue, Net Sales, Operating Income,
+  Free Cash Flow, Board, Board of Directors, Company, Investor Relations, millions, billions,
+  thousands, Nasdaq, NASDAQ, NYSE, SEC, Securities and Exchange Commission, BUSINESS WIRE,
+  Business Wire, PR Newswire, PRNewswire, GLOBE NEWSWIRE, GlobeNewswire]
+ner:
+  model: en_core_web_sm
+  labels: {ORG: company, PERSON: person, GPE: place, LOC: place, FAC: place, NORP: place, DATE: date}
+  # spaCy DATE spans are masked only when they hold a digit or a month name
+  date_needs: digit_or_month
+max_passes: 3

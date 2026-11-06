@@ -17,4 +17,6 @@ Live recorders share the PC: a crypto capture, a Deribit cron and Tardis downloa
 
 ## Local inference runtime
 
-llama.cpp's build or release commit is recorded here at M6 (P-12).
+llama.cpp `llama-server`, release `b11796` (2026-10-21, commit `0a1ef309cdbb9f2024f58a38fb4c42352c5db569`), Ubuntu x64 CPU build, installed by `scripts/serve_local_llm.sh install` and checked against its SHA-256 (`70b856d4...`). It serves `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` (bartowski/Meta-Llama-3.1-8B-Instruct-GGUF at revision `bf5b95e9`, 4.92 GB, SHA-256 `7b064f58...`) on 127.0.0.1:8080 with 8 threads, an 8,192-token context, one slot and nice 10. The owner started it on 2026-11-04 (P-12).
+
+Measured on 50 contamination-sample documents (2026-11-04, `m6-llama-bench50`): 50 of 50 valid answers, 32.2 s mean per document (p50 32.0 s, p95 38.1 s), 2,291 prompt tokens and 53 output tokens on average. Prompt evaluation ran at about 78 tokens per second and generation at about 4.6, with the system prompt served from llama.cpp's prompt cache after the first call. That is about 2,680 documents per day.

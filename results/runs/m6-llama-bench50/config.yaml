@@ -1,0 +1,12 @@
+already_cached: 0
+bypass_cache: false
+command: score llm
+config: configs/default.yaml
+documents: 50
+mode: sync
+model: llama-3.1-8b-instruct-q4_k_m
+prompt_version: score_v1@190b8b18
+provider: local
+sample: item202_contam
+worst_case_input_tokens: 0
+worst_case_usd: 0.0

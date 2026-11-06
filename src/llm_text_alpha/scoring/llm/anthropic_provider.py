@@ -153,6 +153,12 @@ class AnthropicProvider:
         )
         return worst * max(1, int(len(requests) * 0.02) + 1)
 
+    def model_info(self, model_id: str) -> dict[str, Any]:
+        """The Models API record (lifecycle, retirement date, capabilities); free, no spend."""
+        info: Any = self._client.models.retrieve(model_id)
+        record: dict[str, Any] = info.model_dump(mode="json")
+        return record
+
     def count_tokens(self, request: ScoreRequest) -> int:
         """Prompt tokens for ``request`` from the free token-counting endpoint (no spend)."""
         params = self.params(request)
@@ -220,7 +226,11 @@ class AnthropicProvider:
         attempts: int = 1,
     ) -> CachedResponse:
         raw = _text(message)
-        payload, valid = parse_payload(raw) if message.stop_reason == "end_turn" else (None, False)
+        payload, valid = (
+            parse_payload(raw, request.answer)
+            if message.stop_reason == "end_turn"
+            else (None, False)
+        )
         usage = _usage(message.usage)
         return CachedResponse(
             cache_key=request.cache_key(),
@@ -411,7 +421,9 @@ class AnthropicProvider:
     @staticmethod
     def _result(response: CachedResponse, request: ScoreRequest, hit: bool) -> ScoreResult:
         payload, valid = (
-            parse_payload(response.raw_text) if response.schema_valid else (None, False)
+            parse_payload(response.raw_text, request.answer)
+            if response.schema_valid
+            else (None, False)
         )
         return ScoreResult(
             doc_id=request.doc_id,

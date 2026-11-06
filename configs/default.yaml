@@ -41,23 +41,41 @@ scorers:
       item202_main: {doc_type: 8k_item202, n: 20000, stratify: year, seed: 7}
       # every event in Haiku 5.5's post-cutoff window, preregistered in docs/preregistration.md
       item202_post_h55: {doc_type: 8k_item202, n: 100000, stratify: year, seed: 7, after: "2026-07-01"}
-      item202_contam: {doc_type: 8k_item202, n: 3000, stratify: [year, cutoff_window], seed: 11}
+      # equal share per cutoff window (before 2024-01, Llama post, Haiku 4.5 post, Haiku 5.5 post)
+      item202_contam:
+        doc_type: 8k_item202
+        n: 3000
+        stratify: [year, cutoff_window]
+        seed: 11
+        equal_by: cutoff_window
+        cutoff_breaks: ["2024-01-01", "2025-08-01", "2026-07-01"]
+      # local model: what CPU scoring fits in about 24 h raw + masked (D-05), from item202_contam;
+      # 600 events before Llama 3.1's cutoff (w0) and 600 after
+      item202_local:
+        from_sample: item202_contam
+        n: 1200
+        stratify: [year, cutoff_window]
+        seed: 17
+        equal_by: cutoff_window
+        allocation: {w0: 600, w1: 200, w2: 200, w3: 200}
     runs:
       - {provider: anthropic, model: claude-haiku-5-5, sample: item202_main, masked: [false, true], mode: batch}
       - {provider: anthropic, model: claude-haiku-5-5, sample: item202_post_h55, masked: [false, true], mode: batch}
       - {provider: anthropic, model: claude-haiku-4-5, sample: item202_contam, masked: [false, true], mode: batch}
-      - {provider: local, model: llama-3.1-8b-instruct-q4_k_m, sample: item202_contam, masked: [false, true]}
+      - {provider: local, model: llama-3.1-8b-instruct-q4_k_m, sample: item202_local, masked: [false, true]}
 signals:
   # LLM scorers: alias -> model and the samples whose scores it uses (raw text)
   llm_scorers:
-    llm: {model: claude-haiku-5-5, samples: [item202_main, item202_post_h55]}
+    llm: {model: claude-haiku-5-5, samples: [item202_main, item202_post_h55], masked: [false, true]}
+    llm_h45: {model: claude-haiku-4-5, samples: [item202_contam], masked: [false, true]}
+    llm_llama: {model: llama-3.1-8b-instruct-q4_k_m, samples: [item202_local], masked: [false, true]}
 budget:
   llm_budget_usd_env: LLM_BUDGET_USD # value comes from env; default 25
   price_table: configs/llm_prices.yaml
   max_price_table_age_days: 45
 masking:
   config: configs/masking.yaml
-  version: m1
+  version: m2
 evaluation:
   ar_model: ff5umd
   estimation_window: [-250, -30]
@@ -84,7 +102,17 @@ evaluation:
   ablation: {scorers: [lm, finbert, llm], hold_days: 5, min_events: 50}
 contamination:
   windows_from: configs/models.yaml
-  probes: {reidentify_n: 300, outcome_recall_n: 300}
+  # model id -> its scorer alias in signals.llm_scorers
+  models: {claude-haiku-5-5: llm, claude-haiku-4-5: llm_h45, llama-3.1-8b-instruct-q4_k_m: llm_llama}
+  baselines: [lm, finbert]
+  bootstrap_reps: 500
+  probes:
+    sample: item202_contam
+    reidentify_n: 300
+    outcome_recall_n: 300
+    seed: 13
+    reid_prompt: configs/prompts/probe_reid_v1.md
+    recall_prompt: configs/prompts/probe_recall_v1.md
 reporting:
   figures_dir: reports/figures
   tables_dir: reports/tables

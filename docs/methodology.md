@@ -186,3 +186,33 @@ At AUM A per leg, each position is A divided by the leg's open positions on its 
 ### Trials (FR-30)
 
 `lta eval trials` counts trial-log rows by family. It computes the Deflated Sharpe Ratio of the pre-registered portfolio from the number and dispersion of all portfolio trials.
+
+## Contamination protocol and latency (M6)
+
+The full protocol, the masking review and the results are in
+[contamination_protocol.md](contamination_protocol.md). In short:
+
+- **Three models with different training cutoffs.**
+
+  | Model | Cutoff | Events scored, raw and masked |
+  |---|---|---|
+  | Haiku 5.5 | Jun 2026 | 20,554 |
+  | Haiku 4.5 | Jul 2025 | 3,000 (`item202_contam`) |
+  | Llama 3.1 8B | Dec 2023 | 1,200 (`item202_local`) |
+
+- **Masking.** Each model scores raw and masked versions of the same input window. Masking
+  removes company names, tickers, people, places, contact details, dates, years and fiscal
+  periods (`m2@f47398b1`).
+- **2x2 cells.** For each model, four cells (before and after its cutoff, raw and masked) on
+  the same events give the Q5 - Q1 CAR[0,5] spread and the IC, with 95% intervals.
+- **DiD.** The model's pre-minus-post change is compared with LM's and FinBERT's change on the
+  same events (event bootstrap). The spread version is pre-registered; the IC version is
+  secondary.
+- **Probes.**
+  - Re-identification: the model names the company and quarter from masked text.
+  - Outcome recall: the model gives the five-day return direction from the company, ticker and
+    date alone.
+
+[latency_budget.md](latency_budget.md) builds acceptance-to-order latency per scorer from
+measured components plus a cited bound for EDGAR dissemination, and gives the cost per
+traded signal.

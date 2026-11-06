@@ -1,0 +1,26 @@
+{
+  "cache_hits": 1501,
+  "cache_read_tokens": 0,
+  "ended_at": "2026-11-05T03:41:45.090821+00:00",
+  "estimate": {
+    "already_cached": 1501,
+    "bypass_cache": false,
+    "documents": 3000,
+    "mode": "batch",
+    "model": "claude-haiku-4-5",
+    "prompt_version": "score_v1@190b8b18",
+    "provider": "anthropic",
+    "sample": "item202_contam",
+    "worst_case_input_tokens": 7919265,
+    "worst_case_usd": 6.868260625
+  },
+  "input_tokens": 8788761,
+  "output_tokens": 135624,
+  "refusals": 0,
+  "requests": 3000,
+  "retried": 0,
+  "schema_valid": 3000,
+  "started_at": "2026-11-05T03:38:37.429773+00:00",
+  "status": "done",
+  "usd": 2.37106
+}

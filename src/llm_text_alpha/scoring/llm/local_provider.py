@@ -80,7 +80,9 @@ class LocalProvider:
         choice = data["choices"][0]
         raw = choice["message"].get("content") or ""
         finish = choice.get("finish_reason") or ""
-        payload, valid = parse_payload(raw) if finish in ("stop", "") else (None, False)
+        payload, valid = (
+            parse_payload(raw, request.answer) if finish in ("stop", "") else (None, False)
+        )
         usage = data.get("usage", {})
         tokens = TokenUsage(
             int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
@@ -114,7 +116,9 @@ class LocalProvider:
                     cached = self._call(request, 2)
                 self.cache.put(key, cached)
             payload, valid = (
-                parse_payload(cached.raw_text) if cached.schema_valid else (None, False)
+                parse_payload(cached.raw_text, request.answer)
+                if cached.schema_valid
+                else (None, False)
             )
             results.append(
                 ScoreResult(

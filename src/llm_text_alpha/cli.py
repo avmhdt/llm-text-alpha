@@ -239,6 +239,129 @@ def corpus_build(
     typer.echo(f"{result.documents.height} documents; extraction success {rate:.2%}")
 
 
+@corpus_app.command("mask")
+def corpus_mask(
+    samples: Annotated[str, typer.Option(help="Comma-separated LLM samples to mask.")] = (
+        "item202_main,item202_post_h55,item202_contam"
+    ),
+    processes: Annotated[int, typer.Option(help="spaCy worker processes (<= 8).")] = 4,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Mask entities and dates in the LLM's input window of each sampled document (FR-14)."""
+    from llm_text_alpha.corpus.mask import Entity, Masker, mask_many
+    from llm_text_alpha.scoring.common import scoring_text
+    from llm_text_alpha.scoring.llm.prompts import truncate
+
+    if not 1 <= processes <= 8:
+        typer.echo("error: --processes must be 1 to 8", err=True)
+        raise typer.Exit(2)
+    settings, _ = _start("corpus mask", run_id)
+    cfg = load_yaml(config)
+    mcfg = _mask_config(cfg)
+    llm_cfg = cfg["scorers"]["llm"]
+    max_chars = int(int(llm_cfg["max_input_tokens"]) * float(llm_cfg["chars_per_token"]))
+    docs = (
+        pl.concat(
+            [
+                _sample_docs(settings, cfg, s.strip()).select(
+                    "doc_id", "text", "company_name", "former_names", "ticker", "cik"
+                )
+                for s in samples.split(",")
+            ]
+        )
+        .unique("doc_id", keep="first")
+        .sort("doc_id")
+    )
+    windows = [truncate(scoring_text(text), max_chars)[0] for text in docs["text"]]
+    entities = [
+        Entity(tuple([r["company_name"] or "", *(r["former_names"] or [])]), r["ticker"], r["cik"])
+        for r in docs.iter_rows(named=True)
+    ]
+    from llm_text_alpha.scoring.dictionary import english_words
+
+    english = english_words(settings.data_path(cfg["scorers"]["lm"]["dictionary_file"]))
+    masker = Masker(mcfg, Masker.load_nlp(mcfg.ner_model), english)
+    results = mask_many(masker, windows, entities, n_process=processes)
+    kinds = list(mcfg.placeholders)
+    table = pl.DataFrame(
+        {
+            "doc_id": docs["doc_id"],
+            "mask_version": [mcfg.version] * docs.height,
+            "text_masked": [r.text for r in results],
+            **{f"n_{k}": [r.counts.get(k, 0) for r in results] for k in kinds},
+            "residual_name_hits": [r.residual_name_hits for r in results],
+            "residual_year_hits": [r.residual_year_hits for r in results],
+            "residual_word_hits": [r.residual_word_hits for r in results],
+            "passes": [r.passes for r in results],
+            "raw_chars": [len(w) for w in windows],
+        },
+        schema_overrides={f"n_{k}": pl.Int32 for k in kinds}
+        | {
+            "residual_name_hits": pl.Int32,
+            "residual_year_hits": pl.Int32,
+            "residual_word_hits": pl.Int32,
+        },
+    )
+    folder = _masked_folder(settings, mcfg.version)
+    write_parquet_atomic(table, folder / "part-00000.parquet")
+    (folder / "masking.yaml").write_text(Path(cfg["masking"]["config"]).read_text("utf-8"), "utf-8")
+    leaked = int((table["residual_name_hits"] > 0).sum())
+    typer.echo(
+        f"{table.height} documents masked ({mcfg.version}); {leaked} with residual name hits"
+    )
+
+
+@corpus_app.command("audit-mask")
+def corpus_audit_mask(
+    review: Annotated[int, typer.Option(help="Random documents written out for review.")] = 50,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Residual name, ticker and year hits (AC-W-09), and a local file for manual review."""
+    settings, resolved = _start("corpus audit-mask", run_id)
+    cfg = load_yaml(config)
+    version = _mask_config(cfg).version
+    folder = _masked_folder(settings, version)
+    table = pl.read_parquet(folder / "*.parquet")
+    n = table.height
+
+    def mean(column: pl.Series) -> float:
+        return float(column.cast(pl.Float64).to_numpy().mean())
+
+    share_names = mean(table["residual_name_hits"] > 0)
+    share_years = mean(table["residual_year_hits"] > 0)
+    rows = [
+        {"metric": "documents", "value": float(n)},
+        {"metric": "share_with_residual_name_or_ticker", "value": share_names},
+        {"metric": "share_with_residual_year", "value": share_years},
+        {
+            "metric": "share_with_lowercase_word_equal_to_short_name",
+            "value": mean(table["residual_word_hits"] > 0)
+            if "residual_word_hits" in table.columns
+            else 0.0,
+        },
+        *[
+            {"metric": f"mean_{c}", "value": mean(table[c])}
+            for c in table.columns
+            if c.startswith("n_")
+        ],
+        {"metric": "mean_passes", "value": mean(table["passes"])},
+    ]
+    command = f"lta corpus audit-mask ({version})"
+    write_table(pl.DataFrame(rows), Path("reports/tables"), "mask_audit", command, resolved)
+    picked = table.sample(n=min(review, n), seed=int(cfg["seed"]))
+    lines = [f"# Masking review sample ({version})", ""]
+    for r in picked.iter_rows(named=True):
+        lines += [f"## {r['doc_id']}", "", r["text_masked"][:1500], ""]
+    (folder / "review.md").write_text("\n".join(lines), "utf-8")
+    verdict = "pass" if share_names <= 0.01 and share_years <= 0.01 else "fail"
+    typer.echo(
+        f"{n} documents: residual names {share_names:.2%}, residual years {share_years:.2%} "
+        f"({verdict}); review sample at {folder / 'review.md'}"
+    )
+
+
 @score_app.command("dict")
 def score_dict(
     doc_types: Annotated[str, typer.Option(help="Document types.")] = "8k_item202",
@@ -303,6 +426,56 @@ class _LLMJob:
     cache_root: Path
 
 
+def _sample_docs(settings: Settings, cfg: dict[str, Any], sample: str) -> pl.DataFrame:
+    """The documents of a configured sample, drawn reproducibly from the scorable corpus."""
+    from llm_text_alpha.scoring.llm import run as llm_run
+
+    spec = cfg["scorers"]["llm"]["samples"][sample]
+    if spec.get("from_sample"):
+        docs = _sample_docs(settings, cfg, str(spec["from_sample"]))
+        return llm_run.draw_sample(
+            docs,
+            int(spec["n"]),
+            spec.get("stratify", "year"),
+            int(spec["seed"]),
+            spec.get("equal_by"),
+            {str(k): int(v) for k, v in spec["allocation"].items()},
+        )
+    docs = pipeline.scorable(pipeline.load_documents(pipeline.Paths.of(settings))).filter(
+        pl.col("doc_type") == spec.get("doc_type", "8k_item202")
+    )
+    if spec.get("before"):
+        cutoff = datetime.fromisoformat(str(spec["before"])).replace(tzinfo=UTC)
+        docs = docs.filter(pl.col("event_ts_utc") < cutoff)
+    if spec.get("after"):
+        start = datetime.fromisoformat(str(spec["after"])).replace(tzinfo=UTC)
+        docs = docs.filter(pl.col("event_ts_utc") >= start)
+    if spec.get("cutoff_breaks"):
+        docs = llm_run.cutoff_windows(docs, spec["cutoff_breaks"])
+    return llm_run.draw_sample(
+        docs, int(spec["n"]), spec.get("stratify", "year"), int(spec["seed"]), spec.get("equal_by")
+    )
+
+
+def _mask_config(cfg: dict[str, Any], ner: bool = True) -> Any:
+    from llm_text_alpha.corpus.mask import MaskConfig
+
+    return MaskConfig.load(Path(cfg["masking"]["config"]), ner=ner)
+
+
+def _masked_folder(settings: Settings, version: str) -> Path:
+    return pipeline.Paths.of(settings).root / "interim" / "masked" / f"mask_version={version}"
+
+
+def _masked_texts(settings: Settings, cfg: dict[str, Any]) -> pl.DataFrame:
+    version = _mask_config(cfg).version
+    folder = _masked_folder(settings, version)
+    if not any(folder.glob("*.parquet")):
+        typer.echo(f"error: no masked documents for {version}; run lta corpus mask", err=True)
+        raise typer.Exit(1)
+    return pl.read_parquet(folder / "*.parquet", columns=["doc_id", "text_masked"])
+
+
 def _llm_job(
     settings: Settings,
     config: Path,
@@ -319,13 +492,9 @@ def _llm_job(
     from llm_text_alpha.scoring.llm.cache import ResponseCache
     from llm_text_alpha.scoring.llm.registry import ModelRegistry
 
-    if masked:
-        typer.echo("error: masked text arrives in M6", err=True)
-        raise typer.Exit(2)
     cfg = load_yaml(config)
     llm_cfg = cfg["scorers"]["llm"]
-    spec = llm_cfg["samples"].get(sample)
-    if spec is None:
+    if sample not in llm_cfg["samples"]:
         typer.echo(f"error: no sample {sample!r} in {config}", err=True)
         raise typer.Exit(2)
     registry = ModelRegistry.load(Path(llm_cfg.get("models", "configs/models.yaml")))
@@ -333,24 +502,32 @@ def _llm_job(
     if model_spec.provider != provider:
         typer.echo(f"error: {model} is a {model_spec.provider} model, not {provider}", err=True)
         raise typer.Exit(2)
-    docs = pipeline.scorable(pipeline.load_documents(pipeline.Paths.of(settings))).filter(
-        pl.col("doc_type") == spec.get("doc_type", "8k_item202")
-    )
-    if spec.get("before"):
-        cutoff = datetime.fromisoformat(str(spec["before"])).replace(tzinfo=UTC)
-        docs = docs.filter(pl.col("event_ts_utc") < cutoff)
-    if spec.get("after"):
-        start = datetime.fromisoformat(str(spec["after"])).replace(tzinfo=UTC)
-        docs = docs.filter(pl.col("event_ts_utc") >= start)
-    chosen = llm_run.draw_sample(
-        docs, int(spec["n"]), spec.get("stratify", "year"), int(spec["seed"])
-    )
+    chosen = _sample_docs(settings, cfg, sample)
     if max_docs is not None:
         chosen = chosen.head(max_docs)
+    max_chars = int(int(llm_cfg["max_input_tokens"]) * float(llm_cfg["chars_per_token"]))
+    text_column = "text"
+    if masked:
+        masked_docs = _masked_texts(settings, cfg)
+        chosen = chosen.drop("text").join(masked_docs, on="doc_id", how="left")
+        missing = chosen["text_masked"].null_count()
+        if missing:
+            typer.echo(
+                f"error: {missing} documents lack masked text; run lta corpus mask", err=True
+            )
+            raise typer.Exit(1)
+        text_column = "text_masked"
+        max_chars = 10**9  # the masked text is already the raw window, masked
     prompt = llm_prompts.load_prompt(Path(llm_cfg["prompt"]))
     max_chars = int(int(llm_cfg["max_input_tokens"]) * float(llm_cfg["chars_per_token"]))
     requests = llm_prompts.build_requests(
-        chosen, model, prompt, max_chars, int(llm_cfg["max_output_tokens"]), model_spec.request
+        chosen,
+        model,
+        prompt,
+        max_chars,
+        int(llm_cfg["max_output_tokens"]),
+        model_spec.request,
+        text_column,
     )
     root = cache_root or settings.llm_cache_path
     instance = llm_run.make_provider(
@@ -431,6 +608,40 @@ def llm_calibrate(
     record_run(resolved, {"command": "llm calibrate", "model": model, "n": n}, summary)
     for key, value in summary.items():
         typer.echo(f"{key}: {value}")
+
+
+@llm_app.command("models")
+def llm_models(
+    models: Annotated[str, typer.Option(help="Comma-separated Anthropic model ids.")] = (
+        "claude-haiku-5-5,claude-haiku-4-5,claude-sonnet-4-6"
+    ),
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Lifecycle and retirement date of each model from the Models API (D-04); no spend."""
+    from llm_text_alpha.scoring.llm import run as llm_run
+    from llm_text_alpha.scoring.llm.cache import ResponseCache
+    from llm_text_alpha.scoring.llm.registry import ModelRegistry
+
+    settings, resolved = _start("llm models", run_id)
+    cfg = load_yaml(config)
+    registry = ModelRegistry.load(Path(cfg["scorers"]["llm"].get("models", "configs/models.yaml")))
+    provider: Any = llm_run.make_provider(
+        "anthropic",
+        settings,
+        registry,
+        ResponseCache(settings.llm_cache_path),
+        resolved,
+        Path(cfg["budget"]["price_table"]),
+    )
+    for model_id in models.split(","):
+        info = provider.model_info(model_id)
+        caps = info.get("capabilities") or {}
+        structured = caps.get("structured_outputs", {}).get("supported")
+        typer.echo(
+            f"{model_id}: lifecycle {info.get('lifecycle')}, retires_at {info.get('retires_at')}, "
+            f"deprecated_at {info.get('deprecated_at')}, structured outputs {structured}"
+        )
 
 
 @llm_app.command("spend")
@@ -901,6 +1112,415 @@ def eval_trials(config: ConfigOpt = DEFAULT_CONFIG, run_id: RunIdOpt = None) -> 
         )
 
 
+def _probe_frames(settings: Settings, cfg: dict[str, Any]) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """The documents the probes ask about: masked texts, and events with CAR[0,5] and names."""
+    from llm_text_alpha.evaluation.abnormal import cumulative
+
+    pc = cfg["contamination"]["probes"]
+    docs = _sample_docs(settings, cfg, str(pc["sample"]))
+    if "cutoff_window" in docs.columns:
+        per = int(pc["reidentify_n"]) // docs["cutoff_window"].n_unique()
+        picked = pl.concat(
+            [
+                part.sample(n=min(per, part.height), seed=int(pc["seed"]))
+                for _, part in docs.sort("doc_id").group_by("cutoff_window", maintain_order=True)
+            ]
+        )
+    else:
+        picked = docs.sort("doc_id").sample(n=int(pc["reidentify_n"]), seed=int(pc["seed"]))
+    picked = picked.sort("doc_id")
+    masked = picked.select("doc_id").join(_masked_texts(settings, cfg), on="doc_id", how="inner")
+    paths = pipeline.Paths.of(settings)
+    folder = paths.abnormal / f"model={cfg['evaluation']['ar_model']}"
+    kept = pl.read_parquet(folder / "events.parquet").filter(pl.col("drop_reason").is_null())
+    ar = pl.read_parquet(folder / "ar.parquet").join(kept.select("doc_id"), on="doc_id", how="semi")
+    cars = cumulative(ar, [5]).drop("permno")
+    events = picked.select(
+        "doc_id", "event_ts_utc", "company_name", "former_names", "ticker", "cik"
+    ).join(cars, on="doc_id", how="inner")
+    return masked, events.head(int(pc["outcome_recall_n"]))
+
+
+@score_app.command("probes")
+def score_probes(
+    provider: ProviderOpt = "anthropic",
+    model: ModelOpt = "claude-haiku-5-5",
+    mode: ModeOpt = "batch",
+    dry_run: Annotated[bool, typer.Option(help="Estimate only.")] = False,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Re-identification and outcome-recall probes for one model (FR-20)."""
+    from llm_text_alpha.evaluation import probes
+    from llm_text_alpha.scoring.llm import prompts as llm_prompts
+    from llm_text_alpha.scoring.llm import run as llm_run
+    from llm_text_alpha.scoring.llm.cache import ResponseCache
+    from llm_text_alpha.scoring.llm.registry import ModelRegistry
+
+    settings, resolved = _start("score probes", run_id)
+    cfg = load_yaml(config)
+    pc = cfg["contamination"]["probes"]
+    registry = ModelRegistry.load(Path(cfg["scorers"]["llm"].get("models", "configs/models.yaml")))
+    spec = registry.get(model)
+    if spec.provider != provider:
+        typer.echo(f"error: {model} is a {spec.provider} model, not {provider}", err=True)
+        raise typer.Exit(2)
+    masked, events = _probe_frames(settings, cfg)
+    reid_prompt = llm_prompts.load_prompt(Path(pc["reid_prompt"]))
+    recall_prompt = llm_prompts.load_prompt(Path(pc["recall_prompt"]))
+    reid = probes.reid_requests(masked, model, reid_prompt, spec.request)
+    recall = probes.recall_requests(events, model, recall_prompt, spec.request)
+    instance: Any = llm_run.make_provider(
+        provider,
+        settings,
+        registry,
+        ResponseCache(settings.llm_cache_path),
+        resolved,
+        Path(cfg["budget"]["price_table"]),
+    )
+    plan = {
+        "model": model,
+        "provider": provider,
+        "mode": mode,
+        "reid_requests": len(reid),
+        "recall_requests": len(recall),
+        "reid_prompt": reid_prompt.version,
+        "recall_prompt": recall_prompt.version,
+        "worst_case_usd": instance.estimate_cost(reid, mode).worst_case_usd
+        + instance.estimate_cost(recall, mode).worst_case_usd,
+    }
+    typer.echo(f"estimate: {json.dumps(plan, sort_keys=True)}")
+    if dry_run:
+        return
+    record_run(
+        resolved, {"command": "score probes", **plan}, {"estimate": plan, "status": "started"}
+    )
+    reid_results = instance.score(reid, mode)
+    recall_results = instance.score(recall, mode)
+    suffixes = _mask_config(cfg, ner=False).legal_suffixes
+    earnings = pl.read_parquet(pipeline.Paths.of(settings).panels / "earnings.parquet").filter(
+        pl.col("announce_doc_id").is_not_null()
+    )
+    quarter = {
+        r["announce_doc_id"]: probes.true_quarter(r["fqtr_end"])
+        for r in earnings.select("announce_doc_id", "fqtr_end").iter_rows(named=True)
+    }
+    info = {
+        r["doc_id"]: r for r in _sample_docs(settings, cfg, str(pc["sample"])).iter_rows(named=True)
+    }
+    reid_rows = []
+    for res in reid_results:
+        doc = info[res.doc_id]
+        names = [doc["company_name"] or "", *(doc["former_names"] or [])]
+        ans = res.payload
+        truth = quarter.get(res.doc_id)
+        reid_rows.append(
+            {
+                "doc_id": res.doc_id,
+                "event_ts_utc": doc["event_ts_utc"],
+                "valid": res.schema_valid,
+                "company_correct": probes.company_match(
+                    ans.company if ans else None,
+                    ans.ticker if ans else None,
+                    names,
+                    doc["ticker"],
+                    suffixes,
+                )
+                if ans
+                else None,
+                "quarter_correct": (
+                    (ans.period_year, ans.period_quarter) == truth if ans and truth else None
+                ),
+                "confidence": ans.confidence if ans else None,
+                "guess_company": ans.company if ans else None,
+                "guess_ticker": ans.ticker if ans else None,
+                "guess_year": ans.period_year if ans else None,
+                "guess_quarter": ans.period_quarter if ans else None,
+                "true_company": doc["company_name"],
+                "true_ticker": doc["ticker"],
+                "true_year": truth[0] if truth else None,
+                "true_quarter": truth[1] if truth else None,
+                "usd": res.usd,
+            }
+        )
+    recall_rows = []
+    cars = {r["doc_id"]: r["car_5"] for r in events.iter_rows(named=True)}
+    for res in recall_results:
+        ans = res.payload
+        up = cars[res.doc_id] > 0
+        recall_rows.append(
+            {
+                "doc_id": res.doc_id,
+                "event_ts_utc": info[res.doc_id]["event_ts_utc"],
+                "valid": res.schema_valid,
+                "direction_correct": ((ans.direction == "up") == up) if ans else None,
+                "said_up": (ans.direction == "up") if ans else None,
+                "truth_up": up,
+                "confidence": ans.confidence if ans else None,
+                "usd": res.usd,
+            }
+        )
+    out = pipeline.Paths.of(settings).root / "processed" / "probes" / f"model={model}"
+    write_parquet_atomic(pl.DataFrame(reid_rows), out / "reid.parquet")
+    write_parquet_atomic(pl.DataFrame(recall_rows), out / "recall.parquet")
+    spent = sum(r.usd for r in reid_results) + sum(r.usd for r in recall_results)
+    metrics = {"estimate": plan, "status": "done", "usd": spent}
+    record_run(resolved, {"command": "score probes", **plan}, metrics)
+    typer.echo(
+        f"{len(reid_rows)} re-identification and {len(recall_rows)} recall probes, ${spent:.4f}"
+    )
+
+
+def _prereg_sha(repo: Path) -> str:
+    import subprocess
+
+    out = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", "docs/preregistration.md"],
+        capture_output=True,
+        text=True,
+        cwd=repo,
+    )
+    return out.stdout.strip()
+
+
+@eval_app.command("contamination")
+def eval_contamination(
+    models: Annotated[str, typer.Option(help="Comma-separated model ids.")] = (
+        "claude-haiku-5-5,claude-haiku-4-5,llama-3.1-8b-instruct-q4_k_m"
+    ),
+    probes_on: Annotated[
+        bool, typer.Option("--probes/--no-probes", help="Add probe results.")
+    ] = True,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """2x2 pre/post-cutoff x raw/masked tables, DiD against baselines and probes (FR-20)."""
+    from llm_text_alpha.evaluation import contamination as ct
+    from llm_text_alpha.evaluation import probes
+    from llm_text_alpha.evaluation.abnormal import cumulative
+    from llm_text_alpha.reporting.figures import contamination_figure
+    from llm_text_alpha.scoring.llm.registry import ModelRegistry
+    from llm_text_alpha.tracking import trial_log
+
+    settings, resolved = _start("eval contamination", run_id)
+    cfg = load_yaml(config)
+    cc = cfg["contamination"]
+    registry = ModelRegistry.load(Path(cfg["scorers"]["llm"].get("models", "configs/models.yaml")))
+    paths = pipeline.Paths.of(settings)
+    signals = pl.read_parquet(paths.signals)
+    folder = paths.abnormal / f"model={cfg['evaluation']['ar_model']}"
+    kept = pl.read_parquet(folder / "events.parquet").filter(pl.col("drop_reason").is_null())
+    ar = pl.read_parquet(folder / "ar.parquet").join(kept.select("doc_id"), on="doc_id", how="semi")
+    cars = cumulative(ar, [5]).drop("permno")
+    report = _report(f"lta eval contamination --models {models}", resolved, config)
+    sha = _prereg_sha(Path.cwd())
+    cells_all, did_all, summary_all, probe_all = [], [], [], []
+    for model_id in models.split(","):
+        scorer = cc["models"][model_id]
+        if signals.filter(pl.col("scorer") == scorer).is_empty():
+            typer.echo(f"{model_id}: no signals for {scorer}; skipped")
+            continue
+        post = registry.get(model_id).post_cutoff_start
+        assert post is not None
+        cells = ct.two_by_two(signals, cars, scorer, post).with_columns(
+            pl.lit(model_id).alias("model_id")
+        )
+        dids = [
+            ct.did(signals, cars, scorer, b, post, int(cc["bootstrap_reps"]), int(cfg["seed"]))
+            for b in cc["baselines"]
+        ]
+        summary = ct.summary_rows(model_id, scorer, post, cells, dids)
+        if probes_on:
+            pfolder = paths.root / "processed" / "probes" / f"model={model_id}"
+            for kind, column in (
+                ("reid", "company_correct"),
+                ("reid", "quarter_correct"),
+                ("recall", "direction_correct"),
+            ):
+                f = pfolder / f"{kind}.parquet"
+                if f.exists():
+                    acc = probes.accuracy(pl.read_parquet(f), column, post).with_columns(
+                        pl.lit(model_id).alias("model_id"),
+                        pl.lit(f"{kind}:{column}").alias("probe"),
+                    )
+                    probe_all.append(acc)
+                    for r in acc.iter_rows(named=True):
+                        summary[f"{kind}_{column}_{r['window']}"] = r["accuracy"]
+        cells_all.append(cells)
+        did_all += [d | {"model_id": model_id} for d in dids]
+        summary_all.append(summary)
+        contamination_figure(
+            cells,
+            f"Contamination: {model_id}",
+            f"Q5 - Q1 CAR[0,5] with 95% intervals; post-cutoff from {post}; "
+            f"paired events scored on raw and masked text",
+            report.figures / f"contamination_{model_id}.png",
+        )
+        params = {
+            "model_id": model_id,
+            "scorer": scorer,
+            "post_cutoff_start": post.isoformat(),
+            "baselines": list(cc["baselines"]),
+            "doc_type": "8k_item202",
+            "preregistration_sha": sha,
+        }
+        rid = trial_log.new_run_id()
+        trial_log.record_run(
+            rid,
+            params,
+            {"cells": cells.to_dicts(), "did": dids, "summary": summary},
+            report.trial_log,
+        )
+        trial_log.log_trial(
+            rid,
+            "contamination",
+            params,
+            None,
+            None,
+            0,
+            None,
+            None,
+            report.trial_log,
+            run_kind="analysis",
+        )
+    if not cells_all:
+        typer.echo("no model had signals")
+        raise typer.Exit(1)
+    write_table(
+        pl.concat(cells_all), report.tables, "contamination_cells", report.command, resolved
+    )
+    write_table(pl.DataFrame(did_all), report.tables, "contamination_did", report.command, resolved)
+    write_table(pl.DataFrame(summary_all), report.tables, "contamination", report.command, resolved)
+    if probe_all:
+        write_table(
+            pl.concat(probe_all), report.tables, "contamination_probes", report.command, resolved
+        )
+    typer.echo(f"{len(cells_all)} models written to {report.tables / 'contamination.md'}")
+
+
+@eval_app.command("latency")
+def eval_latency(
+    fetch_sample: Annotated[int, typer.Option(help="Recent filings fetched live and timed.")] = 20,
+    config: ConfigOpt = DEFAULT_CONFIG,
+    run_id: RunIdOpt = None,
+) -> None:
+    """Cost per signal and the acceptance-to-order latency budget per scorer (FR-22)."""
+    import shutil
+    import tempfile
+    import time
+
+    import numpy as np
+
+    from llm_text_alpha.corpus.calendar import xnys
+    from llm_text_alpha.corpus.parse import extract_text
+    from llm_text_alpha.data.edgar_fetch import fetch_filing
+    from llm_text_alpha.evaluation import latency as lat
+    from llm_text_alpha.tracking import trial_log
+
+    settings, resolved = _start("eval latency", run_id)
+    cfg = load_yaml(config)
+    paths = pipeline.Paths.of(settings)
+    signals = pl.read_parquet(paths.signals)
+    calls_dir = settings.llm_cache_path / "llm_calls"
+    calls = pl.read_parquet(calls_dir / "*.parquet") if any(calls_dir.glob("*.parquet")) else None
+    rows = []
+    for scorer in ("lm", "finbert"):
+        scores = pipeline.load_scores(paths, scorer)
+        rows.append(
+            lat.cost_rows(
+                scorer,
+                str(scores["model_id"][0]),
+                None,
+                scores,
+                lat.traded_share(signals, scorer),
+                1.0,
+            )
+        )
+    for alias, spec in cfg["signals"]["llm_scorers"].items():
+        model_calls = None if calls is None else calls.filter(pl.col("model_id") == spec["model"])
+        if model_calls is None or model_calls.is_empty():
+            continue
+        rows.append(
+            lat.cost_rows(
+                alias, spec["model"], model_calls, None, lat.traded_share(signals, alias), 2.0
+            )
+        )
+    scoring = pl.DataFrame(rows)
+    index = pl.read_parquet(paths.root / "interim" / "edgar" / "filings_index.parquet")
+    recent = (
+        index.filter(pl.col("items").list.contains("2.02") & (pl.col("form") == "8-K"))
+        .sort("submissions_acceptance_utc", descending=True)
+        .unique("accession", keep="first", maintain_order=True)
+        .head(fetch_sample)
+    )
+    scratch = Path(tempfile.mkdtemp(dir=paths.root))
+    fetch_ms: list[float] = []
+    try:
+        with SecClient.from_settings(settings) as client:
+            for cik, accession in recent.select("cik", "accession").iter_rows():
+                started = time.perf_counter()
+                manifest = fetch_filing(client, scratch, int(cik), str(accession))
+                for doc in manifest["documents"]:
+                    files = list(scratch.rglob(doc["filename"]))
+                    if files:
+                        extract_text(files[0].read_bytes(), doc["filename"])
+                fetch_ms.append((time.perf_counter() - started) * 1000.0)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    fetch = lat.quantiles(fetch_ms)
+    calendar = xnys()
+    instants = np.array([calendar.opens_ns[100] - 3_600_000_000_000], dtype=np.int64)
+    decision = lat.quantiles(lat.time_calls(lambda: calendar.first_open_after(instants), 1000))
+    plan = lat.budget(fetch, decision, scoring)
+    docs = pipeline.load_documents(
+        paths, ["doc_id", "event_ts_utc", "doc_type", "excluded"]
+    ).filter((pl.col("doc_type") == "8k_item202") & ~pl.col("excluded"))
+    local = docs["event_ts_utc"].dt.convert_time_zone("America/New_York")
+    minutes = local.dt.hour().cast(pl.Int32) * 60 + local.dt.minute().cast(pl.Int32)
+    in_session = float(((minutes >= 570) & (minutes < 960)).mean())  # type: ignore[arg-type]
+    components = pl.DataFrame(
+        [
+            {
+                "component": "EDGAR dissemination (acceptance to public)",
+                "measured": False,
+                **lat.quantiles([]),
+            },
+            {
+                "component": f"EDGAR fetch and parse ({fetch['n']} live filings)",
+                "measured": True,
+                **fetch,
+            },
+            {"component": "gate and order decision", "measured": True, **decision},
+        ]
+    )
+    report = _report("lta eval latency", resolved, config)
+    write_table(scoring, report.tables, "cost_latency", report.command, resolved)
+    write_table(plan, report.tables, "latency_budget", report.command, resolved)
+    write_table(components, report.tables, "latency_components", report.command, resolved)
+    params = {"fetch_sample": fetch_sample, "scorers": scoring["scorer"].to_list()}
+    rid = trial_log.new_run_id()
+    trial_log.record_run(
+        rid,
+        params,
+        {
+            "fetch": fetch,
+            "decision": decision,
+            "in_session_share": in_session,
+            "scoring": scoring.to_dicts(),
+        },
+        report.trial_log,
+    )
+    trial_log.log_trial(
+        rid, "latency", params, None, None, 0, None, None, report.trial_log, run_kind="analysis"
+    )
+    fetched = (
+        f"fetch+parse p50 {fetch['p50_ms']:.0f} ms, p95 {fetch['p95_ms']:.0f} ms"
+        if fetch["n"]
+        else "no live fetch"
+    )
+    typer.echo(f"{fetched}; {in_session:.1%} of releases accepted during the regular session")
+
+
 @app.command("verify")
 def verify(
     ac_id: Annotated[str, typer.Argument(help="Criterion id such as ac-w-11, or 'all'.")],
@@ -945,6 +1565,10 @@ def verify(
         "ac-w-03": lambda: verify_mod.check_ablation(
             repo / "reports" / "tables", [str(s) for s in cfg["evaluation"]["ablation"]["scorers"]]
         ),
+        "ac-w-09": lambda: verify_mod.check_masking(
+            repo / "reports" / "tables", repo / "docs" / "contamination_protocol.md"
+        ),
+        "ac-h-07": lambda: verify_mod.check_preregistration(repo, repo / DEFAULT_LOG),
         "ac-h-01": lambda: verify_mod.check_headline(
             repo / "reports" / "tables", dict(cfg["evaluation"]["portfolio"]["headline"])
         ),
@@ -985,14 +1609,8 @@ _LATER: dict[str, list[tuple[str, str, str]]] = {
     "data": [
         ("gdelt", "M5", "Stream GDELT GKG records matched to the universe"),
     ],
-    "corpus": [
-        ("mask", "M6", "Mask entities and dates"),
-        ("audit-mask", "M6", "Report residual masking hits"),
-    ],
-    "eval": [
-        ("contamination", "M6", "Contamination protocol"),
-        ("latency", "M6", "Latency budget"),
-    ],
+    "corpus": [],
+    "eval": [],
     "report": [("build", "M7", "Figures and tables")],
 }
 

@@ -49,17 +49,48 @@ CALLS_SCHEMA = pl.Schema(
 )
 
 
+def cutoff_windows(documents: pl.DataFrame, breaks: Sequence[str]) -> pl.DataFrame:
+    """Add ``cutoff_window`` (``w0`` before the first break, ``w1`` from it, ...) by event date."""
+    expr = pl.lit("w0")
+    for i, b in enumerate(breaks, start=1):
+        start = datetime.fromisoformat(str(b)).replace(tzinfo=UTC)
+        expr = pl.when(pl.col("event_ts_utc") >= start).then(pl.lit(f"w{i}")).otherwise(expr)
+    return documents.with_columns(expr.alias("cutoff_window"))
+
+
 def draw_sample(
-    documents: pl.DataFrame, n: int, stratify: str | Sequence[str], seed: int
+    documents: pl.DataFrame,
+    n: int,
+    stratify: str | Sequence[str],
+    seed: int,
+    equal_by: str | None = None,
+    allocation: dict[str, int] | None = None,
 ) -> pl.DataFrame:
     """A stratified sample of ``n`` documents, proportional to each stratum's size.
 
     Strata come from ``stratify`` columns (``year`` is derived from ``event_ts_utc``).
     Documents are sorted by ``doc_id`` first, so the draw depends only on the seed and the
     corpus. Rounding is resolved by largest remainder, so the total is exactly ``n`` (or the
-    corpus size, if smaller).
+    corpus size, if smaller). With ``equal_by``, each value of that column gets ``n // k`` of
+    the draw (all of it when smaller), split proportionally by the other keys; with
+    ``allocation`` as well, each value gets the count it names instead.
     """
     keys = [stratify] if isinstance(stratify, str) else list(stratify)
+    if equal_by is not None and allocation is not None:
+        rest = [k for k in keys if k != equal_by] or ["year"]
+        return pl.concat(
+            [
+                draw_sample(documents.filter(pl.col(equal_by) == g), int(k), rest, seed)
+                for g, k in sorted(allocation.items())
+            ]
+        ).sort("doc_id")
+    if equal_by is not None:
+        groups = documents[equal_by].unique().sort().to_list()
+        rest = [k for k in keys if k != equal_by] or ["year"]
+        per = n // len(groups)
+        return pl.concat(
+            [draw_sample(documents.filter(pl.col(equal_by) == g), per, rest, seed) for g in groups]
+        ).sort("doc_id")
     frame = documents.sort("doc_id")
     if "year" in keys and "year" not in frame.columns:
         frame = frame.with_columns(pl.col("event_ts_utc").dt.year().alias("year"))

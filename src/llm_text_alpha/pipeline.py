@@ -235,7 +235,17 @@ def build_signals(
             return sue_scores(earnings)
         if scorer in llm:
             spec = llm[scorer]
-            return load_llm_scores(paths, scorer, spec["model"], spec["samples"])
+            arms = []
+            for masked in spec.get("masked", [False]):
+                try:
+                    arms.append(
+                        load_llm_scores(paths, scorer, spec["model"], spec["samples"], bool(masked))
+                    )
+                except FileNotFoundError as exc:
+                    log.warning("llm_scores_missing", scorer=scorer, masked=masked, error=str(exc))
+            if not arms:
+                raise FileNotFoundError(f"no scores for {scorer} ({spec['model']})")
+            return pl.concat(arms)
         return load_scores(paths, scorer)
 
     frames = [frame_of(s) for s in scorers]

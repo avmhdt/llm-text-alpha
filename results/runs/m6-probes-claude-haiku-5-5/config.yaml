@@ -1,0 +1,9 @@
+command: score probes
+mode: batch
+model: claude-haiku-5-5
+provider: anthropic
+recall_prompt: probe_recall_v1@8d50e26f
+recall_requests: 288
+reid_prompt: probe_reid_v1@39c0ce6d
+reid_requests: 300
+worst_case_usd: 0.1368423125
