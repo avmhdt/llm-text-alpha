@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -173,7 +173,7 @@ def run_portfolios(
                         "alpha_factors": list(regressors),
                         "nw_lags": ctx.lags,
                     }
-                    run_id = _log_portfolio(params, daily, fit, report)
+                    _log_portfolio(params, daily, fit, report)
                     gross = pf.factor_alpha(
                         daily, factors, "ls_gross", regressors=regressors, lags=ctx.lags
                     )
@@ -195,7 +195,6 @@ def run_portfolios(
                             "beta_pead": fit.betas.get("pead"),
                             "beta_mktrf": fit.betas["mktrf"],
                             "missing_returns": result.missing_returns,
-                            "run_id": run_id,
                         }
                     )
                     if hold == 5 and mult == 1.0 and window_name == "all":
@@ -413,7 +412,6 @@ def run_trials(
         "headline_sharpe_annual": deflated.sr * np.sqrt(252.0) if deflated else None,
         "sr0_daily": deflated.sr0 if deflated else None,
         "dsr": deflated.dsr if deflated else None,
-        "computed_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     write_table(
         summary.drop("note"), report.tables, "trials", report.command, report.run_id, report.label

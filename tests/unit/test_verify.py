@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import polars as pl
+import pytest
 
 from llm_text_alpha import verify
 from llm_text_alpha.tracking.trial_log import ensure_log
@@ -145,3 +146,49 @@ def test_headline_check(tmp_path: Path) -> None:
     outcome = verify.check_headline(tables, head)
     assert outcome.status == "fail" and "not met" in outcome.detail
     assert verify.check_headline(tables, head | {"window": "x"}).detail.startswith("no row")
+
+
+def test_writeup_check(tmp_path: Path) -> None:
+    assert verify.check_writeup(tmp_path).status == "fail"
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.md").write_text("x", "utf-8")
+    section = (
+        "## Look-ahead bias and memorization\n"
+        "Glasserman and Lin; Lopez-Lira and Tang; Sarkar and Vafa; He, Lv, Manela and Wu; "
+        "Golchin and Surdeanu. Numbers: 75%, 54%, 28%. See [a](docs/a.md).\n## Next\n"
+    )
+    (tmp_path / "README.md").write_text("# Memo\n" + section, "utf-8")
+    assert verify.check_writeup(tmp_path).status == "pass"
+    (tmp_path / "README.md").write_text(
+        "# Memo\n" + section.replace("Golchin", "X") + "[b](reports/b.md)", "utf-8"
+    )
+    outcome = verify.check_writeup(tmp_path)
+    assert outcome.status == "fail" and "only 4" in outcome.detail and "broken" in outcome.detail
+    (tmp_path / "README.md").write_text("# Memo\n## Other\n", "utf-8")
+    assert "no '" in verify.check_writeup(tmp_path).detail
+
+
+def test_repro_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess as sp
+
+    outputs = iter([sp.CompletedProcess([], 0, "", ""), sp.CompletedProcess([], 0, "", "")])
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: next(outputs))
+    assert verify.check_repro(tmp_path).status == "pass"
+    outputs = iter(
+        [sp.CompletedProcess([], 0, "", ""), sp.CompletedProcess([], 0, " 1 file changed", "")]
+    )
+    assert verify.check_repro(tmp_path).status == "fail"
+    outputs = iter([sp.CompletedProcess([], 1, "", "boom")])
+    assert "boom" in verify.check_repro(tmp_path).detail
+
+
+def test_evidence_check(tmp_path: Path) -> None:
+    assert verify.check_evidence("ac-h-06", tmp_path).status == "fail"
+    for rel in verify.EVIDENCE["ac-h-02"]:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# p\nmodel_id\na\nb\n", "utf-8")
+    outcome = verify.check_evidence("ac-h-02", tmp_path)
+    assert outcome.status == "fail" and "need 3" in outcome.detail
+    (tmp_path / "reports/tables/contamination.csv").write_text("# p\nmodel_id\na\nb\nc\n", "utf-8")
+    assert verify.check_evidence("ac-h-02", tmp_path).status == "pass"

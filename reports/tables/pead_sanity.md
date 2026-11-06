@@ -1,4 +1,4 @@
-<!-- command=lta eval event-study --scorers lm,finbert,sue | run_id=50f0d794-a3ab-4dc7-8905-0feaac3705e7 | git_sha=84a57712b273102b7ec1c64c58d3760882232283-dirty | provider=licensed -->
+<!-- command=lta eval event-study --scorers lm,finbert,sue,llm | source=lta repro | provider=licensed -->
 
 | group | n | car_1_60 | se | t |
 |---|---|---|---|---|

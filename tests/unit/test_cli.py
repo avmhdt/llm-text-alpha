@@ -51,14 +51,12 @@ def test_help_lists_groups() -> None:
     "args",
     [
         ["data", "gdelt"],
-        ["report", "build"],
-        ["repro"],
     ],
 )
 def test_later_commands_say_when_they_arrive(args: list[str]) -> None:
     result = runner.invoke(cli.app, args)
     assert result.exit_code == 2
-    assert "arrives in M" in result.output
+    assert "not implemented" in result.output
 
 
 def test_data_smoke_passes(workdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,9 +112,6 @@ def test_verify_repository_criteria(workdir: Path) -> None:
     assert "PASS" in result.output
     result = runner.invoke(cli.app, ["verify", "AC-W-12"])
     assert result.exit_code == 0, result.output
-    result = runner.invoke(cli.app, ["verify", "ac-w-13"])
-    assert result.exit_code == 0
-    assert "PENDING  ac-w-13: arrives in M7" in result.output
     result = runner.invoke(cli.app, ["verify", "ac-x-99"])
     assert result.exit_code == 1
 
@@ -142,6 +137,17 @@ def test_verify_all_runs_the_smoke(workdir: Path, monkeypatch: pytest.MonkeyPatc
         cli.verify_mod,
         "check_cost_latency",
         lambda scores, calls: cli.verify_mod.Outcome("ac-w-10", "pass", "stub"),
+    )
+    monkeypatch.setattr(
+        cli.verify_mod, "check_writeup", lambda repo: cli.verify_mod.Outcome("ac-h-04", "pass", "s")
+    )
+    monkeypatch.setattr(
+        cli.verify_mod, "check_repro", lambda repo: cli.verify_mod.Outcome("ac-w-13", "pass", "s")
+    )
+    monkeypatch.setattr(
+        cli.verify_mod,
+        "check_evidence",
+        lambda ac, repo: cli.verify_mod.Outcome(ac, "pass", "s"),
     )
     monkeypatch.setattr(
         cli.verify_mod,
@@ -234,3 +240,74 @@ def test_corpus_build_end_to_end(
     assert docs.height == 2
     enriched = pl.read_parquet(data / "interim" / "edgar" / "filings_index.parquet")
     assert enriched["acceptance_raw"].to_list() == ["x", "x"]
+
+
+def test_repro_is_deterministic_and_leaves_the_log_alone(
+    workdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from llm_text_alpha.reporting.tables import write_table
+    from llm_text_alpha.tracking import trial_log
+
+    calls: list[str] = []
+
+    def fake(name: str) -> object:
+        def step(**kwargs: object) -> None:
+            calls.append(name)
+            report = cli._report(f"lta {name}", trial_log.new_run_id(), cli.DEFAULT_CONFIG)
+            write_table(
+                pl.DataFrame({"x": [1.5, 2.0]}), report.tables, name, report.command, report.run_id
+            )
+            trial_log.log_trial(
+                trial_log.new_run_id(),
+                "analysis_step",
+                {"s": name},
+                None,
+                None,
+                0,
+                None,
+                None,
+                report.trial_log,
+                run_kind="analysis",
+            )
+
+        return step
+
+    for attr, name in (
+        ("signals_build", "signals"),
+        ("eval_abnormal", "abnormal"),
+        ("eval_event_study", "es"),
+        ("eval_regress", "regress"),
+        ("eval_portfolio", "portfolio"),
+        ("eval_ablation", "ablation"),
+        ("eval_capacity", "capacity"),
+        ("eval_contamination", "contamination"),
+        ("corpus_audit_mask", "mask"),
+        ("eval_latency", "latency"),
+        ("eval_trials", "trials"),
+    ):
+        monkeypatch.setattr(cli, attr, fake(name))
+    log = workdir / "results" / "trial_log.csv"
+    before = log.read_text("utf-8")
+    assert runner.invoke(cli.app, ["repro", "--offline"]).exit_code == 0
+    tables = workdir / "reports" / "tables"
+    first = {p.name: p.read_bytes() for p in tables.iterdir()}
+    assert runner.invoke(cli.app, ["report", "build", "--offline"]).exit_code == 0
+    second = {p.name: p.read_bytes() for p in tables.iterdir()}
+    assert first == second and len(first) == 2 * 11
+    assert first["signals.csv"].startswith(b"# command=lta signals | source=lta repro")
+    assert log.read_text("utf-8") == before
+    assert calls[:12] == [
+        "signals",
+        "abnormal",
+        "es",
+        "regress",
+        "regress",
+        "portfolio",
+        "ablation",
+        "capacity",
+        "contamination",
+        "mask",
+        "latency",
+        "trials",
+    ]
+    assert cli._REPRO["trial_log"] is None

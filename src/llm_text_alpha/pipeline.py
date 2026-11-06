@@ -581,8 +581,8 @@ def run_pead_check(paths: Paths, model: str, report: Report) -> pl.DataFrame:
         data.group_by("quintile")
         .agg(
             pl.len().alias("n"),
-            pl.col("car_1_60").mean().alias("car_1_60"),
-            (pl.col("car_1_60").std() / pl.len().sqrt()).alias("se"),
+            pl.col("car_1_60").sort().mean().alias("car_1_60"),
+            (pl.col("car_1_60").sort().std() / pl.len().sqrt()).alias("se"),
         )
         .sort("quintile")
         .with_columns(pl.format("Q{}", pl.col("quintile")).alias("group"))

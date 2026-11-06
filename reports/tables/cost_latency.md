@@ -1,4 +1,4 @@
-<!-- command=lta eval latency | run_id=f5c27e5c-6a54-4691-824d-858b2503d787 | git_sha=7fefad323e988cd2b058591f8c52259ca13a5329 | provider=licensed -->
+<!-- command=lta eval latency | source=lta repro | provider=licensed -->
 
 | scorer | model_id | usd_per_doc_batch | usd_per_doc_sync | n | p50_ms | p95_ms | p99_ms | batch_turnaround_max_s | traded_share | usd_per_traded_signal |
 |---|---|---|---|---|---|---|---|---|---|---|

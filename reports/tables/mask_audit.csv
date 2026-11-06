@@ -1,4 +1,4 @@
-# command=lta corpus audit-mask (m2@f47398b1) | run_id=beaafe23-10df-4e58-a07f-fce231492581 | git_sha=b34565c166da8746ace12194d30e6e56de569d31 | provider=licensed
+# command=lta corpus audit-mask (m2@f47398b1) | source=lta repro | provider=licensed
 metric,value
 documents,21782.0
 share_with_residual_name_or_ticker,0.0

@@ -1,4 +1,4 @@
-<!-- command=lta eval regress --scorers lm,finbert,llm --se both --window post_h55 | run_id=0398465b-b81d-4324-9536-74af26d46fa3 | git_sha=68f21d2eb28ab73b547aabe6f34d3370b6c0ff0b-dirty | provider=licensed -->
+<!-- command=lta eval regress --scorers lm,finbert,llm --se both --window post_h55 | source=lta repro | provider=licensed -->
 
 | scorer | window | horizon | spec | se | coef_score_z | se_score_z | t_score_z | nobs | periods | r2 |
 |---|---|---|---|---|---|---|---|---|---|---|

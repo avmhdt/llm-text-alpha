@@ -6,7 +6,11 @@ exit with code 2 and say which milestone brings them.
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 import json
+import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -59,6 +63,8 @@ score_app = typer.Typer(
     help="Score documents with the dictionary, FinBERT and LLMs.", no_args_is_help=True
 )
 app.add_typer(score_app, name="score")
+report_app = typer.Typer(help="Regenerate figures and tables.", no_args_is_help=True)
+app.add_typer(report_app, name="report")
 llm_app = typer.Typer(help="LLM spend estimates, ledger and batches.", no_args_is_help=True)
 app.add_typer(llm_app, name="llm")
 
@@ -882,12 +888,16 @@ def eval_abnormal(
     typer.echo(f"{counts['events']} events, {counts['kept']} kept")
 
 
+_REPRO: dict[str, Any] = {"trial_log": None}
+"""Under ``lta repro``: the scratch trial log that evaluation steps append to."""
+
+
 def _report(command: str, run_id: str, config: Path) -> pipeline.Report:
     cfg = load_yaml(config).get("reporting", {})
     return pipeline.Report(
         tables=Path(cfg.get("tables_dir", "reports/tables")),
         figures=Path(cfg.get("figures_dir", "reports/figures")),
-        trial_log=DEFAULT_LOG,
+        trial_log=_REPRO["trial_log"] or DEFAULT_LOG,
         command=command,
         run_id=run_id,
     )
@@ -1102,7 +1112,10 @@ def eval_trials(config: ConfigOpt = DEFAULT_CONFIG, run_id: RunIdOpt = None) -> 
 
     _, resolved = _start("eval trials", run_id)
     head = load_yaml(config)["evaluation"]["portfolio"]["headline"]
-    report = _report("lta eval trials", resolved, config)
+    # always the committed log: a repro rerun adds no trials
+    report = dataclasses.replace(
+        _report("lta eval trials", resolved, config), trial_log=DEFAULT_LOG
+    )
     counts, deflated = evaluate.run_trials(report, head)
     typer.echo(f"{int(counts['trials'].sum())} trials logged")
     if deflated is not None:
@@ -1401,6 +1414,9 @@ def eval_contamination(
 @eval_app.command("latency")
 def eval_latency(
     fetch_sample: Annotated[int, typer.Option(help="Recent filings fetched live and timed.")] = 20,
+    offline: Annotated[
+        bool, typer.Option(help="Reuse the last live fetch and decision timings; no network.")
+    ] = False,
     config: ConfigOpt = DEFAULT_CONFIG,
     run_id: RunIdOpt = None,
 ) -> None:
@@ -1453,24 +1469,35 @@ def eval_latency(
         .unique("accession", keep="first", maintain_order=True)
         .head(fetch_sample)
     )
-    scratch = Path(tempfile.mkdtemp(dir=paths.root))
-    fetch_ms: list[float] = []
-    try:
-        with SecClient.from_settings(settings) as client:
-            for cik, accession in recent.select("cik", "accession").iter_rows():
-                started = time.perf_counter()
-                manifest = fetch_filing(client, scratch, int(cik), str(accession))
-                for doc in manifest["documents"]:
-                    files = list(scratch.rglob(doc["filename"]))
-                    if files:
-                        extract_text(files[0].read_bytes(), doc["filename"])
-                fetch_ms.append((time.perf_counter() - started) * 1000.0)
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-    fetch = lat.quantiles(fetch_ms)
-    calendar = xnys()
-    instants = np.array([calendar.opens_ns[100] - 3_600_000_000_000], dtype=np.int64)
-    decision = lat.quantiles(lat.time_calls(lambda: calendar.first_open_after(instants), 1000))
+    measured = paths.root / "processed" / "latency" / "measured.json"
+    if offline:
+        if not measured.exists():
+            typer.echo(f"error: --offline needs {measured}; run lta eval latency once", err=True)
+            raise typer.Exit(1)
+        saved = json.loads(measured.read_text("utf-8"))
+        fetch, decision = saved["fetch"], saved["decision"]
+    else:
+        scratch = Path(tempfile.mkdtemp(dir=paths.root))
+        fetch_ms: list[float] = []
+        try:
+            with SecClient.from_settings(settings) as client:
+                for cik, accession in recent.select("cik", "accession").iter_rows():
+                    started = time.perf_counter()
+                    manifest = fetch_filing(client, scratch, int(cik), str(accession))
+                    for doc in manifest["documents"]:
+                        files = list(scratch.rglob(doc["filename"]))
+                        if files:
+                            extract_text(files[0].read_bytes(), doc["filename"])
+                    fetch_ms.append((time.perf_counter() - started) * 1000.0)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        fetch = lat.quantiles(fetch_ms)
+        calendar = xnys()
+        instants = np.array([calendar.opens_ns[100] - 3_600_000_000_000], dtype=np.int64)
+        decision = lat.quantiles(lat.time_calls(lambda: calendar.first_open_after(instants), 1000))
+        from llm_text_alpha.io import write_json_atomic
+
+        write_json_atomic({"fetch": fetch, "decision": decision}, measured)
     plan = lat.budget(fetch, decision, scoring)
     docs = pipeline.load_documents(
         paths, ["doc_id", "event_ts_utc", "doc_type", "excluded"]
@@ -1546,7 +1573,7 @@ def verify(
             settings.llm_cache_path / "llm_calls",
         )
 
-    checks = {
+    checks: dict[str, Callable[[], verify_mod.Outcome]] = {
         "ac-w-04": ac_w_04,
         "ac-w-05": lambda: verify_mod.run_pytest(
             "ac-w-05", repo, ["tests/integration/test_cache_rerun.py"]
@@ -1565,6 +1592,11 @@ def verify(
         "ac-w-03": lambda: verify_mod.check_ablation(
             repo / "reports" / "tables", [str(s) for s in cfg["evaluation"]["ablation"]["scorers"]]
         ),
+        "ac-w-13": lambda: verify_mod.check_repro(repo),
+        **{
+            ac: functools.partial(verify_mod.check_evidence, ac, repo) for ac in verify_mod.EVIDENCE
+        },
+        "ac-h-04": lambda: verify_mod.check_writeup(repo),
         "ac-w-09": lambda: verify_mod.check_masking(
             repo / "reports" / "tables", repo / "docs" / "contamination_protocol.md"
         ),
@@ -1596,35 +1628,104 @@ def verify(
         raise typer.Exit(1)
 
 
-def _placeholder(group: typer.Typer, name: str, milestone: str, summary: str) -> None:
-    def command(config: ConfigOpt = DEFAULT_CONFIG, run_id: RunIdOpt = None) -> None:
-        typer.echo(f"'{name}' arrives in {milestone}.", err=True)
-        raise typer.Exit(2)
-
-    command.__doc__ = f"{summary} (arrives in {milestone})."
-    group.command(name)(command)
-
-
-_LATER: dict[str, list[tuple[str, str, str]]] = {
-    "data": [
-        ("gdelt", "M5", "Stream GDELT GKG records matched to the universe"),
-    ],
-    "corpus": [],
-    "eval": [],
-    "report": [("build", "M7", "Figures and tables")],
-}
-
-_GROUP_HELP = {
-    "report": "Regenerate figures and tables.",
-}
-
-for _group_name, _commands in _LATER.items():
-    _known = {"data": data_app, "corpus": corpus_app, "score": score_app, "eval": eval_app}
-    _group = _known.get(_group_name) or typer.Typer(
-        help=_GROUP_HELP[_group_name], no_args_is_help=True
+@data_app.command("gdelt")
+def data_gdelt(config: ConfigOpt = DEFAULT_CONFIG, run_id: RunIdOpt = None) -> None:
+    """GDELT GKG news ingest (FR-25, a Should): not built; see docs/decisions.md."""
+    typer.echo(
+        "'gdelt' is not implemented: FR-25 is a Should, and the GKG archive does not fit the "
+        "10 MB/s download cap in reasonable time (docs/decisions.md).",
+        err=True,
     )
-    if _group_name not in _known:
-        app.add_typer(_group, name=_group_name)
-    for _name, _milestone, _summary in _commands:
-        _placeholder(_group, _name, _milestone, _summary)
-_placeholder(app, "repro", "M7", "Rebuild signals, evaluation and reports from data and cache")
+    raise typer.Exit(2)
+
+
+REPRO_STEPS = (
+    "signals build",
+    "eval abnormal",
+    "eval event-study",
+    "eval regress (all)",
+    "eval regress (post_h55)",
+    "eval portfolio",
+    "eval ablation",
+    "eval capacity",
+    "eval contamination",
+    "corpus audit-mask",
+    "eval latency",
+    "eval trials",
+)
+
+
+def _repro(config: Path, offline: bool) -> None:
+    from llm_text_alpha.reporting import tables as tables_mod
+
+    settings, _ = _start("repro", None)
+    paths = pipeline.Paths.of(settings)
+    scratch = paths.root / "repro" / "trial_log.csv"
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(DEFAULT_LOG, scratch)
+    for old in (scratch.parent / "runs").glob("*"):
+        shutil.rmtree(old, ignore_errors=True)
+    steps: dict[str, Any] = {
+        "signals build": lambda: signals_build(
+            scorers="lm,finbert,sue,llm,llm_h45,llm_llama", buffer_min=5, config=config
+        ),
+        "eval abnormal": lambda: eval_abnormal(model="ff5umd", config=config),
+        "eval event-study": lambda: eval_event_study(
+            scorers="lm,finbert,sue,llm", model="ff5umd", config=config
+        ),
+        "eval regress (all)": lambda: eval_regress(
+            scorers="lm,finbert,llm", horizons="1,5,20,60", se="both", window="all", config=config
+        ),
+        "eval regress (post_h55)": lambda: eval_regress(
+            scorers="lm,finbert,llm",
+            horizons="1,5,20,60",
+            se="both",
+            window="post_h55",
+            config=config,
+        ),
+        "eval portfolio": lambda: eval_portfolio(scorers="llm,finbert,lm,sue", config=config),
+        "eval ablation": lambda: eval_ablation(event_set="intersection", config=config),
+        "eval capacity": lambda: eval_capacity(config=config),
+        "eval contamination": lambda: eval_contamination(probes_on=True, config=config),
+        "corpus audit-mask": lambda: corpus_audit_mask(review=50, config=config),
+        "eval latency": lambda: eval_latency(fetch_sample=20, offline=offline, config=config),
+        "eval trials": lambda: eval_trials(config=config),
+    }
+    _REPRO["trial_log"] = scratch
+    tables_mod.set_repro(True)
+    try:
+        for name in REPRO_STEPS:
+            typer.echo(f"== {name}")
+            steps[name]()
+    finally:
+        _REPRO["trial_log"] = None
+        tables_mod.set_repro(False)
+
+
+@app.command("repro")
+def repro(
+    offline: Annotated[
+        bool, typer.Option(help="No network: reuse stored latency timings; nothing is scored.")
+    ] = False,
+    config: ConfigOpt = DEFAULT_CONFIG,
+) -> None:
+    """Rebuild signals, every evaluation table and figure from data and cached scores (FR-24).
+
+    Nothing is scored and no API is called. Evaluation runs append to a scratch copy of the
+    trial log, so the committed log is unchanged, and table headers carry no run id, so a
+    second run leaves reports/tables byte-identical (AC-W-13).
+    """
+    _repro(config, offline)
+
+
+@report_app.command("build")
+def report_build(
+    offline: Annotated[bool, typer.Option(help="Same as lta repro --offline.")] = False,
+    config: ConfigOpt = DEFAULT_CONFIG,
+) -> None:
+    """Regenerate figures and tables; the same steps as ``lta repro``."""
+    _repro(config, offline)
+
+
+if __name__ == "__main__":
+    app()

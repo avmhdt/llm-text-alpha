@@ -1,4 +1,4 @@
-# command=lta eval latency | run_id=f5c27e5c-6a54-4691-824d-858b2503d787 | git_sha=7fefad323e988cd2b058591f8c52259ca13a5329 | provider=licensed
+# command=lta eval latency | source=lta repro | provider=licensed
 scorer,model_id,usd_per_doc_batch,usd_per_doc_sync,n,p50_ms,p95_ms,p99_ms,batch_turnaround_max_s,traded_share,usd_per_traded_signal
 lm,lm-LM_MasterDictionary@e2d13286,0.0,0.0,44464,1.4703909982927144,4.4484265468781805,7.532589079637561,,0.3958239073387024,0.0
 finbert,ProsusAI/finbert@0bc2ac10dda6929bcb1f77ccc43c7ec5c424f031,0.0,0.0,44464,1075.2966345025925,2332.3405220500713,3495.6280086384527,,0.39903628630893134,0.0

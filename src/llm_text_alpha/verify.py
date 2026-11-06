@@ -6,6 +6,7 @@ Criteria whose milestone has not landed report ``pending`` with that milestone.
 from __future__ import annotations
 
 import csv
+import re
 import subprocess
 import sys
 import tempfile
@@ -30,15 +31,8 @@ class Outcome:
     detail: str
 
 
-PENDING = {
-    "ac-w-13": "M7",
-    "ac-h-02": "M6",
-    "ac-h-03": "M6",
-    "ac-h-04": "M7",
-    "ac-h-05": "M5",
-    "ac-h-06": "M5",
-    "ac-h-08": "M5",
-}
+PENDING: dict[str, str] = {}
+"""Criteria whose check arrives in a later milestone; none left after M7."""
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -267,6 +261,114 @@ def check_preregistration(repo: Path, log_path: Path) -> Outcome:
         f"{ran.isoformat()}; SHA in params_json: {has_sha}"
     )
     return Outcome("ac-h-07", "pass" if ok else "fail", detail)
+
+
+REQUIRED_PAPERS = {
+    "Glasserman and Lin (2023)": r"Glasserman",
+    "Lopez-Lira and Tang (2023)": r"Lopez-Lira",
+    "Sarkar and Vafa (2024)": r"Sarkar",
+    "He, Lv, Manela and Wu (2025)": r"Manela",
+}
+OTHER_PAPERS = {
+    "Chen, Kelly and Xiu (2022)": r"Chen, Kelly",
+    "Golchin and Surdeanu (2023)": r"Golchin",
+    "Ke, Kelly and Xiu (2019)": r"Ke, Kelly",
+    "Tetlock (2007)": r"Tetlock",
+    "Loughran and McDonald (2011)": r"Loughran and McDonald",
+    "Cohen, Malloy and Nguyen (2020)": r"Cohen, Malloy",
+}
+SECTION = "## Look-ahead bias and memorization"
+
+
+def check_writeup(repo: Path) -> Outcome:
+    """AC-H-04: the README section cites at least five section-18 papers, the four required
+    ones among them, gives numbers, and every table or doc it links exists."""
+    readme = repo / "README.md"
+    if not readme.exists():
+        return Outcome("ac-h-04", "fail", "no README.md")
+    text = readme.read_text("utf-8")
+    if SECTION not in text:
+        return Outcome("ac-h-04", "fail", f"no '{SECTION}' section")
+    body = text.split(SECTION, 1)[1].split("\n## ", 1)[0]
+    missing = [name for name, pat in REQUIRED_PAPERS.items() if not re.search(pat, body)]
+    cited = [
+        name for name, pat in {**REQUIRED_PAPERS, **OTHER_PAPERS}.items() if re.search(pat, body)
+    ]
+    links = re.findall(r"\]\(((?:reports|docs)/[^)#\s]+)", text)
+    broken = sorted({link for link in links if not (repo / link).exists()})
+    numbers = len(re.findall(r"\d+(?:\.\d+)?%", body))
+    problems = []
+    if missing:
+        problems.append("missing " + ", ".join(missing))
+    if len(cited) < 5:
+        problems.append(f"only {len(cited)} papers cited")
+    if broken:
+        problems.append("broken links: " + ", ".join(broken))
+    if numbers < 3:
+        problems.append("fewer than 3 percentages from the tables")
+    detail = f"{len(cited)} papers cited, {len(links)} links checked, {numbers} percentages"
+    if problems:
+        return Outcome("ac-h-04", "fail", "; ".join(problems))
+    return Outcome("ac-h-04", "pass", detail)
+
+
+def check_repro(repo: Path) -> Outcome:
+    """AC-W-13: ``lta repro --offline`` runs and leaves reports/tables unchanged in git."""
+    result = subprocess.run(
+        [sys.executable, "-m", "llm_text_alpha.cli", "repro", "--offline"],
+        capture_output=True,
+        text=True,
+        cwd=repo,
+    )
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["no output"]
+        return Outcome("ac-w-13", "fail", f"lta repro --offline failed: {tail[0][:200]}")
+    diff = subprocess.run(
+        ["git", "diff", "--stat", "--", "reports/tables"], capture_output=True, text=True, cwd=repo
+    ).stdout.strip()
+    if diff:
+        return Outcome("ac-w-13", "fail", "reports/tables changed: " + diff.splitlines()[-1])
+    return Outcome("ac-w-13", "pass", "lta repro --offline left reports/tables identical")
+
+
+EVIDENCE: dict[str, tuple[str, ...]] = {
+    "ac-h-02": (
+        "reports/tables/contamination.csv",
+        "reports/tables/contamination_cells.csv",
+        "reports/tables/contamination_did.csv",
+        "reports/tables/contamination_probes.csv",
+        "docs/contamination_protocol.md",
+    ),
+    "ac-h-03": (
+        "reports/tables/cost_latency.csv",
+        "reports/tables/latency_budget.csv",
+        "docs/latency_budget.md",
+    ),
+    "ac-h-05": (
+        "reports/tables/regressions.csv",
+        "reports/tables/sue_correlation.csv",
+        "reports/tables/portfolio_alpha.csv",
+    ),
+    "ac-h-06": ("reports/tables/capacity.csv", "reports/figures/capacity.png"),
+    "ac-h-08": ("reports/tables/trials.csv", "reports/tables/trials_dsr.csv"),
+}
+
+
+def check_evidence(ac_id: str, repo: Path) -> Outcome:
+    """An AC-H criterion whose evidence is a set of committed outputs: all must exist.
+
+    These criteria ask for evidence, not a threshold; the memo states what the evidence
+    shows. AC-H-02 also needs three or more models in the contamination table.
+    """
+    missing = [p for p in EVIDENCE[ac_id] if not (repo / p).exists()]
+    if missing:
+        return Outcome(ac_id, "fail", "missing " + ", ".join(missing))
+    if ac_id == "ac-h-02":
+        models = _table(repo / "reports/tables/contamination.csv")["model_id"].n_unique()
+        if models < 3:
+            return Outcome(ac_id, "fail", f"{models} models in the contamination table; need 3")
+        return Outcome(ac_id, "pass", f"evidence for {models} models")
+    return Outcome(ac_id, "pass", f"{len(EVIDENCE[ac_id])} outputs present")
 
 
 def run(ac_id: str, checks: dict[str, Callable[[], Outcome]]) -> list[Outcome]:
