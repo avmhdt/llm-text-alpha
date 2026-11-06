@@ -1,0 +1,8 @@
+baselines:
+- lm
+- finbert
+doc_type: 8k_item202
+model_id: llama-3.1-8b-instruct-q4_k_m
+post_cutoff_start: '2024-01-01'
+preregistration_sha: 68f21d2eb28ab73b547aabe6f34d3370b6c0ff0b
+scorer: llm_llama

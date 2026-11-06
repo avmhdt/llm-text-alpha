@@ -18,7 +18,7 @@
 - [x] Trades at the next available bar after each timestamp; returns labelled as abnormal returns against a factor model. (FR-07, FR-15, AC-W-01, AC-W-07)
 - [x] Baselines first: the Loughran–McDonald dictionary and FinBERT. Then LLM scores or embeddings. LM and FinBERT on 44,464 Item 2.02 releases (M3), then Claude Haiku 5.5 on 21,030 (M4). (FR-08, FR-09, FR-10)
 - [x] An event study of cumulative abnormal returns around each event, plus cross-sectional regressions controlling for size, momentum and earnings surprise (SUE). (FR-16, FR-17, AC-W-02, AC-W-08)
-- [ ] Contamination controls: test only after each model’s training cutoff, and rerun on text with company names and dates masked.
+- [x] Contamination controls: test only after each model’s training cutoff, and rerun on text with company names and dates masked. Three models with different cutoffs (Haiku 5.5, Haiku 4.5, Llama 3.1 8B), each on raw and masked text; masking audit and review in `docs/contamination_protocol.md`. (FR-14, FR-20, AC-W-09)
 - [x] Inference cost and latency tracked per document. Every score has `cost_usd`; synchronous, local, FinBERT and dictionary scores have `latency_ms`; batch calls have their turnaround. (FR-13, AC-W-10)
 
 ## Data
@@ -45,8 +45,8 @@ Raw and licensed data live in `data/`, which is git-ignored. Only download scrip
 ### Impresses hirers
 
 - [ ] Incremental alpha over SUE and known factors with t > 3, net of costs. **Not met.** The pre-registered test (Haiku 5.5 after its cutoff, H = 5, net of 1x costs, FF5 + UMD + PEAD) gives t = -0.51 over 60 days. No scorer has positive net alpha on the full sample either (`reports/tables/portfolio_alpha.md`). (FR-18, AC-H-01)
-- [ ] A contamination analysis: performance before vs after the model cutoff and with masked text, showing how much apparent alpha disappears.
-- [ ] Cost per signal and a realistic latency budget for live use.
+- [x] A contamination analysis: performance before vs after the model cutoff and with masked text, showing how much apparent alpha disappears. Result: no model shows measurable apparent alpha to lose. Every DiD against LM and FinBERT contains zero. The models recognize most companies from masked text, and remember the reported quarter of pre-cutoff filings but not returns (`reports/tables/contamination*.md`). (AC-H-02)
+- [x] Cost per signal and a realistic latency budget for live use. $0.0008 per traded signal for Haiku 5.5 and $0.0087 for Haiku 4.5. Acceptance to order is 0.4 s (dictionary) to 1.7 s (Claude, sync) p50, plus EDGAR dissemination, which does not bind with entry at the next open (`docs/latency_budget.md`). (FR-22, AC-H-03)
 - [ ] A writeup that engages with the look-ahead-bias literature (for example Glasserman and Lin, 2023).
 
 ## Questions this project must answer

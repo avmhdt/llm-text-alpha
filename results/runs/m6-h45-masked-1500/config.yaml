@@ -1,0 +1,12 @@
+already_cached: 2
+bypass_cache: false
+command: score llm
+config: configs/default.yaml
+documents: 1500
+mode: batch
+model: claude-haiku-4-5
+prompt_version: score_v1@190b8b18
+provider: anthropic
+sample: item202_contam
+worst_case_input_tokens: 7904231
+worst_case_usd: 6.857584375

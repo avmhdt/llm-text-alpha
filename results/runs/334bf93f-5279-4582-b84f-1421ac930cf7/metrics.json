@@ -1,0 +1,109 @@
+{
+  "cells": [
+    {
+      "ic": -0.027062915845383947,
+      "ic_hi95": 0.05729084623931795,
+      "ic_lo95": -0.11103301318813001,
+      "model_id": "llama-3.1-8b-instruct-q4_k_m",
+      "n": 542,
+      "scorer": "llm_llama",
+      "spread": NaN,
+      "spread_hi95": NaN,
+      "spread_lo95": NaN,
+      "t_spread": NaN,
+      "text": "raw",
+      "underpowered": false,
+      "window": "pre"
+    },
+    {
+      "ic": -0.04843185771807706,
+      "ic_hi95": 0.033184698265979126,
+      "ic_lo95": -0.1294067467873476,
+      "model_id": "llama-3.1-8b-instruct-q4_k_m",
+      "n": 579,
+      "scorer": "llm_llama",
+      "spread": NaN,
+      "spread_hi95": NaN,
+      "spread_lo95": NaN,
+      "t_spread": NaN,
+      "text": "raw",
+      "underpowered": false,
+      "window": "post"
+    },
+    {
+      "ic": -0.008755849880920132,
+      "ic_hi95": 0.07552302187154747,
+      "ic_lo95": -0.0929105110824771,
+      "model_id": "llama-3.1-8b-instruct-q4_k_m",
+      "n": 542,
+      "scorer": "llm_llama",
+      "spread": NaN,
+      "spread_hi95": NaN,
+      "spread_lo95": NaN,
+      "t_spread": NaN,
+      "text": "masked",
+      "underpowered": false,
+      "window": "pre"
+    },
+    {
+      "ic": -0.025507539355162277,
+      "ic_hi95": 0.056094645813553425,
+      "ic_lo95": -0.10677120834103548,
+      "model_id": "llama-3.1-8b-instruct-q4_k_m",
+      "n": 579,
+      "scorer": "llm_llama",
+      "spread": NaN,
+      "spread_hi95": NaN,
+      "spread_lo95": NaN,
+      "t_spread": NaN,
+      "text": "masked",
+      "underpowered": false,
+      "window": "post"
+    }
+  ],
+  "did": [
+    {
+      "baseline": "lm",
+      "contamination_found": false,
+      "did": NaN,
+      "did_hi95": NaN,
+      "did_lo95": NaN,
+      "n_post": 579,
+      "n_pre": 541,
+      "scorer": "llm_llama"
+    },
+    {
+      "baseline": "finbert",
+      "contamination_found": false,
+      "did": NaN,
+      "did_hi95": NaN,
+      "did_lo95": NaN,
+      "n_post": 579,
+      "n_pre": 541,
+      "scorer": "llm_llama"
+    }
+  ],
+  "summary": {
+    "did_vs_finbert": NaN,
+    "did_vs_finbert_hi95": NaN,
+    "did_vs_finbert_lo95": NaN,
+    "did_vs_lm": NaN,
+    "did_vs_lm_hi95": NaN,
+    "did_vs_lm_lo95": NaN,
+    "model_id": "llama-3.1-8b-instruct-q4_k_m",
+    "post_cutoff_start": "2024-01-01",
+    "recall_direction_correct_all": 0.4513888888888889,
+    "recall_direction_correct_post": 0.4485981308411215,
+    "recall_direction_correct_pre": 0.4594594594594595,
+    "reid_company_correct_all": 0.2821576763485477,
+    "reid_company_correct_post": 0.26881720430107525,
+    "reid_company_correct_pre": 0.32727272727272727,
+    "reid_quarter_correct_all": 0.039301310043668124,
+    "reid_quarter_correct_post": 0.04519774011299435,
+    "reid_quarter_correct_pre": 0.019230769230769232,
+    "scorer": "llm_llama",
+    "share_cutoff": null,
+    "share_masking": null,
+    "share_total": null
+  }
+}

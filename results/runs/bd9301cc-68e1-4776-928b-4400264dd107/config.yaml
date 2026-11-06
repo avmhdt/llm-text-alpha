@@ -1,0 +1,8 @@
+baselines:
+- lm
+- finbert
+doc_type: 8k_item202
+model_id: claude-haiku-5-5
+post_cutoff_start: '2026-07-01'
+preregistration_sha: 68f21d2eb28ab73b547aabe6f34d3370b6c0ff0b
+scorer: llm

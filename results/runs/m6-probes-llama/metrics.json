@@ -1,0 +1,14 @@
+{
+  "estimate": {
+    "mode": "sync",
+    "model": "llama-3.1-8b-instruct-q4_k_m",
+    "provider": "local",
+    "recall_prompt": "probe_recall_v1@8d50e26f",
+    "recall_requests": 288,
+    "reid_prompt": "probe_reid_v1@39c0ce6d",
+    "reid_requests": 300,
+    "worst_case_usd": 0.0
+  },
+  "status": "done",
+  "usd": 0.0
+}

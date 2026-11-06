@@ -126,6 +126,29 @@ def _spread_fast(quintile: np.ndarray, car: np.ndarray) -> float:
     return float(top.mean() - bottom.mean())
 
 
+def _avg_rank(x: np.ndarray) -> np.ndarray:
+    """Ranks with ties given their average rank (1-based)."""
+    _, inverse, counts = np.unique(x, return_inverse=True, return_counts=True)
+    first = np.cumsum(counts) - counts
+    return (first + (counts + 1) / 2.0)[inverse]
+
+
+def _spearman_fast(x: np.ndarray, y: np.ndarray) -> float:
+    if len(x) < 4:
+        return float("nan")
+    rx, ry = _avg_rank(x), _avg_rank(y)
+    if rx.std() == 0 or ry.std() == 0:
+        return float("nan")
+    return float(np.corrcoef(rx, ry)[0, 1])
+
+
+def _interval(draws: list[float]) -> tuple[float, float]:
+    clean = np.array([d for d in draws if math.isfinite(d)])
+    if not len(clean):
+        return float("nan"), float("nan")
+    return float(np.quantile(clean, 0.025)), float(np.quantile(clean, 0.975))
+
+
 def did(
     signals: pl.DataFrame,
     cars: pl.DataFrame,
@@ -135,7 +158,12 @@ def did(
     reps: int = 500,
     seed: int = 0,
 ) -> dict[str, Any]:
-    """(LLM pre - post) minus (baseline pre - post), raw text, the same events, bootstrap CI."""
+    """(LLM pre - post) minus (baseline pre - post), raw text, the same events, bootstrap CI.
+
+    ``did`` uses the Q5 - Q1 CAR[0,5] spread (pre-registered). ``did_ic`` uses the Spearman
+    IC of ``score_z`` with CAR[0,5] instead (secondary): it stays defined when ties leave a
+    scorer's top or bottom trailing quintile empty.
+    """
     events = paired_events(signals, scorer).to_list()
 
     def frame(name: str) -> pl.DataFrame:
@@ -144,51 +172,71 @@ def did(
                 (pl.col("scorer") == name) & ~pl.col("masked") & (pl.col("quintile") > 0)
             )
             .filter(pl.col("doc_id").is_in(events))
-            .select("doc_id", "event_ts_utc", pl.col("quintile").alias(f"q_{name}"))
+            .select(
+                "doc_id",
+                "event_ts_utc",
+                pl.col("quintile").alias(f"q_{name}"),
+                pl.col("score_z").alias(f"z_{name}"),
+            )
         )
 
     data = _window(
         frame(scorer)
         .join(frame(baseline).drop("event_ts_utc"), on="doc_id")
-        .join(cars, on="doc_id"),
+        .join(cars, on="doc_id")
+        .drop_nulls([f"z_{scorer}", f"z_{baseline}", "car_5"]),
         post_start,
     )
     parts = {w: data.filter(pl.col("window") == w) for w in ("pre", "post")}
     arrays = {
-        w: (p[f"q_{scorer}"].to_numpy(), p[f"q_{baseline}"].to_numpy(), p["car_5"].to_numpy())
+        w: (
+            p[f"q_{scorer}"].to_numpy(),
+            p[f"q_{baseline}"].to_numpy(),
+            p[f"z_{scorer}"].to_numpy(),
+            p[f"z_{baseline}"].to_numpy(),
+            p["car_5"].to_numpy(),
+        )
         for w, p in parts.items()
     }
 
-    def estimate(idx: dict[str, np.ndarray]) -> float:
-        value = {}
-        for w, (ql, qb, car) in arrays.items():
+    def estimate(idx: dict[str, np.ndarray]) -> tuple[float, float]:
+        spreads, ics = {}, {}
+        for w, (ql, qb, zl, zb, car) in arrays.items():
             i = idx[w]
-            value[w] = (_spread_fast(ql[i], car[i]), _spread_fast(qb[i], car[i]))
-        return (value["pre"][0] - value["post"][0]) - (value["pre"][1] - value["post"][1])
+            spreads[w] = (_spread_fast(ql[i], car[i]), _spread_fast(qb[i], car[i]))
+            ics[w] = (_spearman_fast(zl[i], car[i]), _spearman_fast(zb[i], car[i]))
+        d_spread = (spreads["pre"][0] - spreads["post"][0]) - (
+            spreads["pre"][1] - spreads["post"][1]
+        )
+        d_ic = (ics["pre"][0] - ics["post"][0]) - (ics["pre"][1] - ics["post"][1])
+        return d_spread, d_ic
 
-    full = {w: np.arange(len(a[2])) for w, a in arrays.items()}
-    point = estimate(full)
+    full = {w: np.arange(len(a[4])) for w, a in arrays.items()}
+    point, point_ic = estimate(full)
     rng = np.random.default_rng(seed)
-    draws = []
+    draws: list[float] = []
+    draws_ic: list[float] = []
     for _ in range(reps):
-        idx = {w: rng.integers(0, len(a[2]), len(a[2])) for w, a in arrays.items() if len(a[2])}
+        idx = {w: rng.integers(0, len(a[4]), len(a[4])) for w, a in arrays.items() if len(a[4])}
         if len(idx) == 2:
-            draws.append(estimate(idx))
-    clean = np.array([d for d in draws if math.isfinite(d)])
-    lo, hi = (
-        (float(np.quantile(clean, 0.025)), float(np.quantile(clean, 0.975)))
-        if len(clean)
-        else (float("nan"), float("nan"))
-    )
+            d, d_ic = estimate(idx)
+            draws.append(d)
+            draws_ic.append(d_ic)
+    lo, hi = _interval(draws)
+    lo_ic, hi_ic = _interval(draws_ic)
     return {
         "scorer": scorer,
         "baseline": baseline,
-        "n_pre": len(arrays["pre"][2]),
-        "n_post": len(arrays["post"][2]),
+        "n_pre": len(arrays["pre"][4]),
+        "n_post": len(arrays["post"][4]),
         "did": point,
         "did_lo95": lo,
         "did_hi95": hi,
         "contamination_found": bool(lo > 0),
+        "did_ic": point_ic,
+        "did_ic_lo95": lo_ic,
+        "did_ic_hi95": hi_ic,
+        "contamination_found_ic": bool(lo_ic > 0),
     }
 
 
@@ -209,4 +257,7 @@ def summary_rows(
         **{f"did_vs_{d['baseline']}": d["did"] for d in dids},
         **{f"did_vs_{d['baseline']}_lo95": d["did_lo95"] for d in dids},
         **{f"did_vs_{d['baseline']}_hi95": d["did_hi95"] for d in dids},
+        **{f"did_ic_vs_{d['baseline']}": d["did_ic"] for d in dids},
+        **{f"did_ic_vs_{d['baseline']}_lo95": d["did_ic_lo95"] for d in dids},
+        **{f"did_ic_vs_{d['baseline']}_hi95": d["did_ic_hi95"] for d in dids},
     }

@@ -130,3 +130,17 @@ def test_did_finds_planted_contamination() -> None:
 def test_disappearing_without_a_base() -> None:
     cells = pl.DataFrame({"text": ["raw"], "window": ["pre"], "spread": [0.0]})
     assert ct.disappearing(cells)["share_total"] is None
+
+
+def test_ic_did_survives_ties() -> None:
+    sig, cars = signals()
+    tied = sig.with_columns(
+        pl.when(pl.col("scorer") == "llm")
+        .then(pl.col("quintile").clip(1, 3))
+        .otherwise(pl.col("quintile"))
+        .alias("quintile")
+    )
+    out = ct.did(tied, cars, "llm", "lm", POST, reps=100)
+    assert np.isnan(out["did"]) and np.isfinite(out["did_ic"])
+    assert out["did_ic"] > 0 and out["contamination_found_ic"]
+    assert ct._avg_rank(np.array([3.0, 1.0, 1.0, 2.0])).tolist() == [4.0, 1.5, 1.5, 3.0]

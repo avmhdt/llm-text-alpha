@@ -123,7 +123,76 @@ Accuracy is reported before and after each model's cutoff, with Wilson 95% inter
 
 Each run's `params_json` carries the pre-registration commit SHA (AC-H-07).
 
-RESULTS_PLACEHOLDER
+## Results (2026-11-06)
+
+Pre-registered hypothesis H3 is not supported: no model shows apparent predictive power that
+disappears after its cutoff or under masking, beyond what the baselines show on the same
+events.
+
+### 2x2 cells: Q5 - Q1 CAR[0,5] spread, and IC with CAR[0,5]
+
+Each cell gives the spread with its 95% CI, then the IC with its 95% CI.
+
+| Model | Raw, before cutoff | Raw, after | Masked, before | Masked, after |
+|---|---|---|---|---|
+| Haiku 5.5 (N 19,297 / 937) | +0.21% [-0.09, +0.50]; IC 0.016 [0.002, 0.030] | -0.06% [-1.70, +1.58]; IC 0.012 | +0.30% [-0.01, +0.61]; IC 0.015 [0.001, 0.029] | +0.85% [-0.87, +2.56]; IC 0.027 |
+| Haiku 4.5 (N 1,439 / 1,431) | +0.05% [-1.07, +1.17]; IC 0.003 | +0.22% [-1.41, +1.84]; IC 0.006 | +0.70% [-0.38, +1.79]; IC 0.020 | +0.10% [-1.32, +1.51]; IC 0.004 |
+| Llama 3.1 8B (N 542 / 579) | no spread (ties); IC -0.027 [-0.111, 0.057] | IC -0.048 [-0.129, 0.033] | IC -0.009 [-0.093, 0.076] | IC -0.026 [-0.107, 0.056] |
+
+- Every spread interval contains zero. Every cell has at least 500 events, so none is flagged.
+- Haiku 5.5's pre-cutoff IC is small and positive (0.016), on raw and masked text alike.
+- "Share of apparent alpha that disappears" (`contamination.md`) is not meaningful here. It
+  divides by a pre-cutoff raw spread that is itself indistinguishable from zero, which gives
+  values such as -312%. It is reported in the table but not interpreted.
+- Llama scores 55% of releases at exactly 1.0. The trailing-quintile rule, unchanged since M3,
+  gives tied scores the lower rank, so no Llama release reaches the top quintile and its spread
+  is undefined. The IC, which handles ties, is the Llama measure. The rule was not changed
+  after the fact.
+- Masking does not hurt the Claude models' cells. Masked spreads are higher than raw in three
+  of four comparisons, consistent with Glasserman and Lin's (2023) "distraction" effect, though
+  none of the differences is significant.
+
+### Difference-in-differences, raw text
+
+| Model | vs LM, spread | vs FinBERT, spread | vs LM, IC (secondary) | vs FinBERT, IC (secondary) |
+|---|---|---|---|---|
+| Haiku 5.5 | -0.73% [-3.03, +1.45] | -1.04% [-2.84, +0.77] | -0.022 [-0.116, 0.063] | -0.048 [-0.124, 0.019] |
+| Haiku 4.5 | +0.23% [-2.27, +2.72] | -1.46% [-3.77, +0.76] | +0.045 [-0.046, 0.146] | -0.039 [-0.116, 0.042] |
+| Llama 3.1 8B | undefined (ties) | undefined (ties) | +0.139 [-0.029, 0.281] | -0.009 [-0.138, 0.111] |
+
+The IC version was added at M6, after the Llama ties appeared, so it is secondary and not part
+of the pre-registration. Llama against LM comes closest to a contamination signal (IC falls by
+0.14 more than LM's after Llama's cutoff), but its interval contains zero, and against FinBERT
+the difference is nil.
+
+### Probes (Wilson 95% intervals)
+
+| Model | Names the company from masked text, before / after cutoff | Names the quarter, before / after | Recalls the 5-day direction, before / after |
+|---|---|---|---|
+| Haiku 5.5 | 75% [69, 80] / 76% [65, 84] | 15% [11, 21] / 3% [1, 10] | 45% / 45% |
+| Haiku 4.5 | 56% [48, 64] / 51% [43, 59] | 19% [14, 27] / 0.7% [0.1, 3.9] | 49% / 46% |
+| Llama 3.1 8B | 33% [22, 46] / 27% [21, 34] | 2% / 5% | 46% / 45% |
+
+- **Masking does not anonymize large companies.** Haiku 5.5 names the company in three of four
+  masked releases, as often after its cutoff as before. A filing it cannot have seen still
+  gives away the company through its products, segments and scale. That is knowledge of the
+  company, not memory of the filing.
+- **Memory of the filing shows in the quarter.** The two Claude models name the reported quarter
+  15-19% of the time on pre-cutoff filings and 1-3% after. Masked periods leave nothing to infer
+  the quarter from, so the pre-cutoff rate is memorization.
+- **Return memory is absent.** Asked whether the stock beat the market over the next five days,
+  every model is at or below chance (45-49%; truth was up 51% of the time). Haiku 4.5 and Llama both say
+  "down" 83% of the time. No model remembers outcomes well enough to have leaked them into a score.
+- **Llama answers less often.** 241 of its 300 re-identification answers were valid; the rest
+  failed the schema and are excluded.
+
+### Reading
+
+The LLM scores show no measurable look-ahead advantage before the cutoffs, so there is little
+apparent alpha for contamination to explain. The models remember some filings (the quarter
+probe) and recognize most companies (the company probe), but neither shows up in returns at
+these sample sizes. That is consistent with M5's portfolio results, where no text signal earns
+alpha net of costs.
 
 ## Limits
 
