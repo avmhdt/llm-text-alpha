@@ -123,7 +123,7 @@ Accuracy is reported before and after each model's cutoff, with Wilson 95% inter
 
 Each run's `params_json` carries the pre-registration commit SHA (AC-H-07).
 
-## Results (2026-11-06)
+## Results (2026-11-06, as reproduced by `lta repro --offline`)
 
 Pre-registered hypothesis H3 is not supported: no model shows apparent predictive power that
 disappears after its cutoff or under masking, beyond what the baselines show on the same
@@ -135,9 +135,9 @@ Each cell gives the spread with its 95% CI, then the IC with its 95% CI.
 
 | Model | Raw, before cutoff | Raw, after | Masked, before | Masked, after |
 |---|---|---|---|---|
-| Haiku 5.5 (N 19,297 / 937) | +0.21% [-0.09, +0.50]; IC 0.016 [0.002, 0.030] | -0.06% [-1.70, +1.58]; IC 0.012 | +0.30% [-0.01, +0.61]; IC 0.015 [0.001, 0.029] | +0.85% [-0.87, +2.56]; IC 0.027 |
-| Haiku 4.5 (N 1,439 / 1,431) | +0.05% [-1.07, +1.17]; IC 0.003 | +0.22% [-1.41, +1.84]; IC 0.006 | +0.70% [-0.38, +1.79]; IC 0.020 | +0.10% [-1.32, +1.51]; IC 0.004 |
-| Llama 3.1 8B (N 542 / 579) | no spread (ties); IC -0.027 [-0.111, 0.057] | IC -0.048 [-0.129, 0.033] | IC -0.009 [-0.093, 0.076] | IC -0.026 [-0.107, 0.056] |
+| Haiku 5.5 (N 19,303 / 937) | +0.21% [-0.09, +0.51]; IC 0.016 [0.002, 0.030] | -0.06% [-1.70, +1.58]; IC 0.012 | +0.30% [-0.00, +0.61]; IC 0.015 [0.001, 0.030] | +0.85% [-0.87, +2.56]; IC 0.027 |
+| Haiku 4.5 (N 1,441 / 1,431) | +0.10% [-1.02, +1.22]; IC 0.004 | +0.22% [-1.41, +1.84]; IC 0.006 | +0.75% [-0.33, +1.83]; IC 0.022 | +0.10% [-1.32, +1.51]; IC 0.004 |
+| Llama 3.1 8B (N 543 / 579) | no spread (ties); IC -0.026 [-0.109, 0.059] | IC -0.048 [-0.129, 0.033] | IC -0.007 [-0.091, 0.077] | IC -0.026 [-0.107, 0.056] |
 
 - Every spread interval contains zero. Every cell has at least 500 events, so none is flagged.
 - Haiku 5.5's pre-cutoff IC is small and positive (0.016), on raw and masked text alike.

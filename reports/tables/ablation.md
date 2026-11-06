@@ -1,4 +1,4 @@
-<!-- command=lta eval ablation --event-set intersection | run_id=21270f9c-62d4-482f-853d-c5295818f0e5 | git_sha=68f21d2eb28ab73b547aabe6f34d3370b6c0ff0b-dirty | provider=licensed -->
+<!-- command=lta eval ablation --event-set intersection | source=lta repro | provider=licensed -->
 
 | combination | window | events | reads | car5_spread | t_car5_spread | car20_spread | t_car20_spread | ic_car5 | ic_monthly | t_ic_monthly | coef_controls | t_coef_controls | alpha_annual_net | t_alpha_net | usd_per_document | usd_per_traded_signal |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|

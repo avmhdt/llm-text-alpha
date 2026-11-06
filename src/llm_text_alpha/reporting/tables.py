@@ -13,9 +13,22 @@ import polars as pl
 from llm_text_alpha.io import write_text_atomic
 from llm_text_alpha.tracking.trial_log import git_sha
 
+_REPRO = {"active": False}
+
+
+def set_repro(active: bool) -> None:
+    """In ``lta repro``, provenance lines name the command only, so reruns are byte-identical."""
+    _REPRO["active"] = active
+
 
 def provenance(command: str, run_id: str, label: str, repo: Path) -> str:
-    """``command=... | run_id=... | git_sha=... | provider=...``."""
+    """``command=... | run_id=... | git_sha=... | provider=...``.
+
+    Under ``lta repro`` the line is ``command=... | source=lta repro | provider=...``: the
+    commit that reproduced a table is the commit it is checked in at.
+    """
+    if _REPRO["active"]:
+        return f"command={command} | source=lta repro | provider={label or 'licensed'}"
     sha = git_sha(repo / "results" / "trial_log.csv")
     return f"command={command} | run_id={run_id} | git_sha={sha} | provider={label or 'licensed'}"
 

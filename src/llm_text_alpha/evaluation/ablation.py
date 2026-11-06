@@ -82,17 +82,21 @@ def spread(frame: pl.DataFrame, car: str) -> dict[str, float]:
 
 def information_coefficient(frame: pl.DataFrame, car: str) -> dict[str, float]:
     """Pooled Spearman IC of ``score_z`` against ``car``, and the mean monthly IC with its t."""
-    data = frame.select("entry_date", "score_z", car).drop_nulls()
+    # sorted so every reduction sums in the same order on every run (byte-identical repro)
+    data = (
+        frame.select("entry_date", "score_z", car).drop_nulls().sort("entry_date", "score_z", car)
+    )
     pooled = (
         float(data.select(pl.corr("score_z", car, method="spearman")).item())
         if data.height > 2
         else float("nan")
     )
     monthly = (
-        data.group_by(pl.col("entry_date").dt.truncate("1mo"))
+        data.group_by(pl.col("entry_date").dt.truncate("1mo"), maintain_order=True)
         .agg(pl.corr("score_z", car, method="spearman").alias("ic"), pl.len().alias("n"))
         .filter(pl.col("n") >= 10)
         .drop_nulls("ic")
+        .sort("entry_date")
     )
     ic = monthly["ic"].to_numpy()
     if len(ic) < 3:

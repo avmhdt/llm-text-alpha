@@ -1,4 +1,4 @@
-<!-- command=lta eval contamination --models claude-haiku-5-5,claude-haiku-4-5,llama-3.1-8b-instruct-q4_k_m | run_id=a430b96c-5153-4d48-9315-b6b7bba292eb | git_sha=7fefad323e988cd2b058591f8c52259ca13a5329-dirty | provider=licensed -->
+<!-- command=lta eval contamination --models claude-haiku-5-5,claude-haiku-4-5,llama-3.1-8b-instruct-q4_k_m | source=lta repro | provider=licensed -->
 
 | scorer | baseline | n_pre | n_post | did | did_lo95 | did_hi95 | contamination_found | did_ic | did_ic_lo95 | did_ic_hi95 | contamination_found_ic | model_id |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|

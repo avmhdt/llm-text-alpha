@@ -1,4 +1,4 @@
-<!-- command=lta eval capacity | run_id=ee304c2c-2125-4a0f-83b4-6d89e6f3fc8b | git_sha=68f21d2eb28ab73b547aabe6f34d3370b6c0ff0b-dirty | provider=licensed -->
+<!-- command=lta eval capacity | source=lta repro | provider=licensed -->
 
 | aum_usd | alpha_annual | t_alpha | sharpe_annual | alpha_annual_impact_only | t_alpha_impact_only | capped_share | mean_scale | mean_impact_bps | scorer | window |
 |---|---|---|---|---|---|---|---|---|---|---|
